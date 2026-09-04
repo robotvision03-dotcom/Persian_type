@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>تایپ گفتاری فارسی</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <main class="shell">
+      <header class="hero">
+        <p class="eyebrow">Persian Type</p>
+        <h1>تایپ گفتاری فارسی</h1>
+        <p class="lede">
+          یک مدل را با دکمه رادیویی انتخاب کنید، دکمه شروع را بزنید و صحبت کنید.
+          بعد مدل دیگری را انتخاب کنید تا ببینید کدام بهتر تایپ می‌کند.
+        </p>
+        <div class="meta-row">
+          <span id="models-path" class="path-chip">...</span>
+          <button type="button" id="refresh-btn" class="ghost">بازخوانی مدل‌ها</button>
+        </div>
+      </header>
+
+      <section class="panel" aria-labelledby="models-title">
+        <div class="panel-head">
+          <h2 id="models-title">مدل‌ها</h2>
+          <p id="status-line" class="status">در حال خواندن مدل‌ها...</p>
+        </div>
+        <form id="model-form" class="model-grid"></form>
+        <p id="empty-models" class="empty hidden">
+          هیچ مدلی پیدا نشد. پوشه‌های مدل را در
+          <code>models</code>
+          بگذارید یا مسیر
+          <code>C:\Users\omid\Documents\appointment\models</code>
+          را در
+          <code>config.json</code>
+          تنظیم کنید.
+        </p>
+      </section>
+
+      <section class="controls-row">
+        <button type="button" id="start-btn" class="start">شروع</button>
+        <button type="button" id="stop-btn" class="stop" disabled>توقف</button>
+        <label class="upload">
+          فایل صوتی
+          <input id="file-input" type="file" accept="audio/*,.wav,.flac,.ogg" />
+        </label>
+        <button type="button" id="rerun-btn" class="ghost" disabled>رونویسی دوباره</button>
+        <div class="meter" aria-hidden="true">
+          <span id="level-bar"></span>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <article class="panel transcript-panel">
+          <div class="panel-head">
+            <h2>متن تایپ‌شده</h2>
+            <div class="actions">
+              <button type="button" id="copy-btn" class="ghost">کپی</button>
+              <button type="button" id="clear-btn" class="ghost">پاک کردن</button>
+            </div>
+          </div>
+          <p id="partial-line" class="partial"></p>
+          <textarea
+            id="transcript"
+            class="transcript"
+            placeholder="متن فارسی اینجا ظاهر می‌شود..."
+            spellcheck="false"
+          ></textarea>
+        </article>
+
+        <article class="panel compare-panel">
+          <div class="panel-head">
+            <h2>مقایسه مدل‌ها</h2>
+            <p class="hint">آخرین نتیجه هر مدل برای همان صدا</p>
+          </div>
+          <div id="compare-list" class="compare-list"></div>
+        </article>
+      </section>
+    </main>
+    <div id="overlay" class="overlay hidden">
+      <div class="spinner"></div>
+      <p id="overlay-text">در حال بارگذاری مدل...</p>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
