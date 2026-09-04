@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.dialogue import ASK_KM, ASK_MODEL, ASK_NAME, GREETING, DialogueManager, parse_km
+from app.dialogue import ASK_KM, ASK_NAME, GREETING, DialogueManager, parse_km
 
 
 class ParseKmTests(unittest.TestCase):
