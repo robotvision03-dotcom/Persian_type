@@ -1716,7 +1716,17 @@ def list_auctions(db_path: Path | None = None) -> list[dict[str, Any]]:
 
 def list_winners(db_path: Path | None = None) -> list[dict[str, Any]]:
     with get_conn(db_path) as conn:
-        rows = conn.execute("SELECT * FROM auction_winners ORDER BY id DESC").fetchall()
+        rows = conn.execute(
+            """
+            SELECT auction_winners.*, buyer_profiles.contact_person AS buyer_name, buyer_profiles.phone AS buyer_phone,
+                   vehicles.brand, vehicles.model, vehicles.id AS vehicle_id
+            FROM auction_winners
+            JOIN buyer_profiles ON buyer_profiles.id = auction_winners.buyer_id
+            JOIN auctions ON auctions.id = auction_winners.auction_id
+            JOIN vehicles ON vehicles.id = auctions.vehicle_id
+            ORDER BY auction_winners.id DESC
+            """
+        ).fetchall()
     return [dict(row) for row in rows]
 
 

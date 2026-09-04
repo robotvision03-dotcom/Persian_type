@@ -15,6 +15,7 @@ let historyNext = "";
 let apptDay = "";
 let apptPrev = "";
 let apptNext = "";
+let lastUnread = -1;
 const pickers = {};
 
 function todayIso() {
@@ -71,7 +72,45 @@ function selectField(name, options, selected, extra = "") {
   return `<select name="${escapeHtml(name)}" ${extra}>${optionHtml(options, selected || "")}</select>`;
 }
 
+function paintWinnerBanner(rows) {
+  const banner = $("winner-banner");
+  if (!banner) return;
+  const wins = (rows || []).filter((row) => row.unread && (row.event === "WINNER_READY" || row.event === "YOU_WON" || row.event === "WINNER_ACCEPTED"));
+  if (!wins.length) {
+    banner.classList.add("hidden");
+    banner.innerHTML = "";
+    return;
+  }
+  banner.classList.remove("hidden");
+  banner.innerHTML = wins
+    .map((row) => `<strong>${escapeHtml(row.title)}</strong><br />${escapeHtml(row.body || "")}`)
+    .join("<hr />");
+}
+
+function renderPendingWinners(winners) {
+  const box = $("pending-winners");
+  if (!box) return;
+  const rows = winners || [];
+  if (!rows.length) {
+    box.innerHTML = "";
+    return;
+  }
+  box.innerHTML = rows
+    .map(
+      (row) => `<article class="notice-win">
+        <strong>برنده مزایده #${row.auction_id}</strong>
+        <p>${escapeHtml(row.brand || "")} ${escapeHtml(row.model || "")} · ${escapeHtml(row.buyer_name || "خریدار #" + row.buyer_id)} · ${money(row.final_price)} تومان</p>
+        <div class="actions">
+          <button class="start accept" type="button" data-id="${row.auction_id}">پذیرش برنده</button>
+          <button class="ghost reject" type="button" data-id="${row.auction_id}">رد برنده</button>
+        </div>
+      </article>`
+    )
+    .join("");
+}
+
 function renderNotes(rows) {
+  paintWinnerBanner(rows);
   const box = $("notes");
   if (!box) return;
   const items = rows || [];
@@ -83,7 +122,7 @@ function renderNotes(rows) {
   box.className = "note-list";
   box.innerHTML = items
     .map((row) => {
-      const win = row.event === "WINNER_READY" || row.event === "YOU_WON";
+      const win = row.event === "WINNER_READY" || row.event === "YOU_WON" || row.event === "WINNER_ACCEPTED";
       return `<article class="note-card ${row.unread ? "unread" : ""} ${win ? "notice-win" : ""}">
         <h4>${escapeHtml(row.title)}</h4>
         <p>${escapeHtml(row.body || "")}</p>
@@ -322,8 +361,10 @@ function startLive() {
     if (!token() || refreshing || document.hidden) return;
     try {
       const live = await api("/live");
-      if (live.revision !== liveRevision) {
+      const unread = Number(live.unread || 0);
+      if (live.revision !== liveRevision || unread !== lastUnread) {
         liveRevision = live.revision;
+        lastUnread = unread;
         await refresh({ live: true });
       }
     } catch (_error) {}
@@ -358,10 +399,19 @@ async function refresh(options) {
       const flags = card.querySelector(".live-flags");
       if (flags) flags.textContent = `کارشناسی: ${car.inspection_completed ? "تمام" : "نه"} · تأیید: ${car.office_approved ? "بله" : "نه"} · انتشار: ${car.published_for_bidding ? "بله" : "نه"}`;
       const auc = card.querySelector(".live-auction");
-      if (auc) auc.textContent = auction ? `مزایده ${auction.status} · فعلی ${money(auction.current_price)} · پایان ${auction.end_time || ""}` : "مزایده‌ای فعال نیست";
+      const winner = (dash.winners || []).find((item) => auction && item.auction_id === auction.id);
+      if (auc) {
+        auc.textContent = winner
+          ? `برنده ${winner.buyer_name || "#" + winner.buyer_id} · ${money(winner.final_price)} تومان`
+          : auction
+            ? `مزایده ${auction.status} · فعلی ${money(auction.current_price)} · پایان ${auction.end_time || ""}`
+            : "مزایده‌ای فعال نیست";
+      }
       const cancelBtn = card.querySelector(".cancel-auc");
       if (cancelBtn && (!auction || auction.status !== "ACTIVE")) cancelBtn.remove();
     });
+    renderPendingWinners(dash.winners || []);
+    await loadNotes();
     lastBuyers = dash.buyers || [];
     $("buyers").innerHTML = `<table class="appts"><thead><tr><th>خریدار</th><th>وضعیت</th><th></th></tr></thead><tbody>${(dash.buyers || [])
       .map(
@@ -400,7 +450,7 @@ async function refresh(options) {
         <h3 class="live-status">#${car.id} ${escapeHtml(car.brand || "خودرو")} ${escapeHtml(car.model || "")} — ${escapeHtml(car.status)}</h3>
         <p class="live-flags">کارشناسی: ${car.inspection_completed ? "تمام" : "نه"} · تأیید: ${car.office_approved ? "بله" : "نه"} · انتشار: ${car.published_for_bidding ? "بله" : "نه"}</p>
         <p class="live-auction">${auction ? `مزایده ${escapeHtml(auction.status)} · فعلی ${money(auction.current_price)} · پایان ${escapeHtml(auction.end_time || "")}` : "مزایده‌ای فعال نیست"}</p>
-        ${winner ? `<p>برنده خریدار ${winner.buyer_id} · ${money(winner.final_price)} · رزرو ${winner.reserve_met ? "تأمین" : "نه"} · ${escapeHtml(winner.status)}</p>` : ""}
+        ${winner ? `<p class="notice-win">برنده ${escapeHtml(winner.buyer_name || "خریدار #" + winner.buyer_id)} · ${money(winner.final_price)} تومان · ${escapeHtml(winner.status)}</p>` : ""}
         <div class="actions">
           <button class="ghost inspect" type="button" data-id="${car.id}">شروع کارشناسی</button>
           <button class="ghost approve" type="button" data-id="${car.id}">تأیید دفتر</button>
@@ -424,6 +474,7 @@ async function refresh(options) {
       <button class="ghost suspend" data-id="${row.id}">تعلیق</button></td></tr>`
     )
     .join("")}</tbody></table>`;
+  renderPendingWinners(dash.winners || []);
   startLive();
   await loadNotes();
   if (!live) {

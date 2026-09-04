@@ -6,8 +6,8 @@
     <title>دفتر مرکز</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=20" />
-    <link rel="stylesheet" href="/static/portal.css?v=20" />
+    <link rel="stylesheet" href="/static/styles.css?v=22" />
+    <link rel="stylesheet" href="/static/portal.css?v=22" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -33,11 +33,13 @@
         </form>
       </section>
       <div id="app-box" class="hidden">
+        <div id="winner-banner" class="winner-sticky hidden" role="status"></div>
         <section class="panel" id="notes-panel">
           <div class="panel-head">
-            <h2>اعلان‌ها</h2>
+            <h2>اعلان برنده و پیام‌ها</h2>
             <button class="ghost" id="notes-read" type="button">همه خوانده شد</button>
           </div>
+          <div id="pending-winners"></div>
           <div id="notes" class="empty">اعلانی نیست.</div>
         </section>
         <section class="panel">
@@ -144,6 +146,6 @@
         </section>
       </div>
     </main>
-    <script src="/static/office.js?v=21"></script>
+    <script src="/static/office.js?v=22"></script>
   </body>
 </html>

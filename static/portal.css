@@ -264,6 +264,25 @@
   line-height: 1.8;
 }
 
+.winner-sticky {
+  position: sticky;
+  top: 8px;
+  z-index: 20;
+  border: 1px solid rgba(201, 162, 39, 0.7);
+  background: #2a2210;
+  color: #f6f1e4;
+  border-radius: 16px;
+  padding: 14px 16px;
+  margin: 0 0 16px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  line-height: 1.8;
+}
+
+.winner-sticky strong {
+  color: var(--gold);
+  font-size: 1.05rem;
+}
+
 .notice-win.hidden,
 .hidden {
   display: none;

@@ -87,6 +87,7 @@ let historyDay = "";
 let historyPage = 1;
 let historyPrev = "";
 let historyNext = "";
+let lastUnread = -1;
 
 function todayIso() {
   const now = new Date();
@@ -97,7 +98,7 @@ function renderNotes(rows) {
   const box = $("notes");
   if (!box) return;
   const items = rows || [];
-  const wins = items.filter((row) => row.event === "YOU_WON" && row.unread);
+  const wins = items.filter((row) => row.unread && (row.event === "YOU_WON" || row.event === "OFFICE_ACCEPTED"));
   const banner = $("winner-banner");
   if (banner) {
     if (wins.length) {
@@ -214,8 +215,10 @@ function startLive() {
     if (!token() || refreshing || document.hidden) return;
     try {
       const live = await api("/live");
-      if (live.revision !== liveRevision) {
+      const unread = Number(live.unread || 0);
+      if (live.revision !== liveRevision || unread !== lastUnread) {
         liveRevision = live.revision;
+        lastUnread = unread;
         await refresh({ live: true });
       }
     } catch (_error) {}
@@ -284,7 +287,8 @@ async function refresh(options) {
       ? `<ul>${appts.map((row) => `<li>${row.date} ${row.time} — نوبت</li>`).join("")}</ul>`
       : "نوبتی نیست.";
     await loadNotes();
-    if (!(options && options.live)) {
+    const won = ($("winner-banner") && !$("winner-banner").classList.contains("hidden")) || !(options && options.live);
+    if (won) {
       if (!historyDay) historyDay = todayIso();
       await loadHistory(historyDay, historyPage);
     }

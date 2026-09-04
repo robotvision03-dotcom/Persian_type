@@ -560,6 +560,9 @@ class DailyLedgerTests(unittest.TestCase):
             office = svc.user_by_email("office@center.local", path)
             office_notes = svc.list_notifications(office["id"], path, office=True)
             self.assertTrue(any(row["event"] == "WINNER_READY" and "برنده تست" in row["body"] for row in office_notes))
+            pending = [row for row in svc.list_winners(path) if row["status"] == "PENDING_OFFICE_CONFIRMATION"]
+            self.assertEqual(pending[0]["buyer_name"], "برنده تست")
+            self.assertTrue(pending[0].get("brand"))
             marked = svc.mark_notifications_read(winner["user_id"], db_path=path)
             self.assertEqual(marked["unread"], 0)
 
