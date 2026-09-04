@@ -89,7 +89,13 @@ def deliver_whatsapp(
     extra = attach_message(invite, origin, kind=kind)
     if extra is None:
         return None
-    result = send_text(extra.get("phone"), extra["whatsapp_text"])
+    result = send_text(
+        extra.get("phone"),
+        extra["whatsapp_text"],
+        token=extra["token"],
+        origin=origin,
+        db_path=db_path,
+    )
     extra["whatsapp_sent"] = result
     record_invite_send(extra["token"], origin, result, db_path=db_path)
     return extra

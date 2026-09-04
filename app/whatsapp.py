@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import json
 import os
+import queue
+import subprocess
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import webbrowser
 from pathlib import Path
 from typing import Any
 
@@ -106,6 +111,172 @@ def _post_form(url: str, payload: dict[str, Any]) -> tuple[bool, str]:
     return _read_response(request)
 
 
+_web_jobs: queue.Queue[dict[str, Any]] = queue.Queue()
+_web_worker_started = False
+_web_lock = threading.Lock()
+
+
+def _can_use_whatsapp_web() -> bool:
+    if os.environ.get("DISABLE_WHATSAPP_WEB") == "1":
+        return False
+    if os.environ.get("WHATSAPP_WEB") == "0":
+        return False
+    if os.environ.get("WHATSAPP_WEB") == "1":
+        return True
+    return os.name == "nt"
+
+
+def web_send_url(phone: str, text: str) -> str:
+    digits = whatsapp_digits(phone)
+    encoded = urllib.parse.quote(text)
+    return (
+        "https://web.whatsapp.com/send/"
+        f"?phone={digits}&text={encoded}&type=phone_number&app_absent=0"
+    )
+
+
+def _browser_candidates() -> list[str]:
+    paths = [
+        os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%PROGRAMFILES%\Microsoft\Edge\Application\msedge.exe"),
+        os.path.expandvars(r"%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe"),
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    ]
+    seen: list[str] = []
+    for path in paths:
+        if path and path not in seen and os.path.isfile(path):
+            seen.append(path)
+    return seen
+
+
+def _open_whatsapp_tab(url: str) -> str:
+    if os.name == "nt":
+        for browser in _browser_candidates():
+            subprocess.Popen([browser, "--new-tab", url], close_fds=True)
+            return browser
+        os.startfile(url)  # type: ignore[attr-defined]
+        return "startfile"
+    webbrowser.open(url, new=2)
+    return "webbrowser"
+
+
+def _focus_whatsapp_window() -> None:
+    if os.name != "nt":
+        return
+    try:
+        subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                (
+                    "$w = New-Object -ComObject WScript.Shell; "
+                    "foreach ($title in @('WhatsApp', 'Chrome', 'Edge')) { "
+                    "if ($w.AppActivate($title)) { break } }"
+                ),
+            ],
+            timeout=8,
+            capture_output=True,
+            check=False,
+        )
+    except Exception:
+        return
+
+
+def _press_send() -> None:
+    import pyautogui
+
+    pyautogui.FAILSAFE = False
+    _focus_whatsapp_window()
+    time.sleep(0.5)
+    for _ in range(3):
+        pyautogui.press("enter")
+        time.sleep(1.0)
+
+
+def send_via_whatsapp_web(to: str, text: str) -> dict[str, Any]:
+    dest = whatsapp_digits(to)
+    source = whatsapp_digits(software_number())
+    result = {
+        "from": f"+{source}" if source else software_number(),
+        "to": f"+{dest}" if dest else "",
+        "provider": "whatsapp-web",
+        "ok": False,
+        "error": "",
+        "queued": False,
+    }
+    wait_s = max(6, int(os.environ.get("WHATSAPP_WEB_WAIT") or 15))
+    try:
+        with _web_lock:
+            opened = _open_whatsapp_tab(web_send_url(dest, text))
+            time.sleep(wait_s)
+            _press_send()
+    except ImportError:
+        result["error"] = "برای ارسال از واتساپ وب، run.bat را دوباره اجرا کنید تا pyautogui نصب شود."
+        return result
+    except Exception as extra:
+        result["error"] = f"واتساپ وب باز نشد: {extra}"
+        return result
+    result["ok"] = True
+    result["browser"] = opened
+    return result
+
+
+def _web_worker() -> None:
+    while True:
+        job = _web_jobs.get()
+        try:
+            result = send_via_whatsapp_web(str(job["to"]), str(job["text"]))
+            token = job.get("token")
+            if token:
+                from .booking import record_invite_send
+
+                record_invite_send(
+                    str(token),
+                    str(job.get("origin") or ""),
+                    result,
+                    db_path=job.get("db_path"),
+                )
+        except Exception:
+            continue
+        finally:
+            _web_jobs.task_done()
+
+
+def _ensure_web_worker() -> None:
+    global _web_worker_started
+    if _web_worker_started:
+        return
+    _web_worker_started = True
+    threading.Thread(target=_web_worker, name="whatsapp-web-send", daemon=True).start()
+
+
+def enqueue_whatsapp_web(
+    to: str,
+    text: str,
+    token: str = "",
+    origin: str = "",
+    db_path: Path | None = None,
+) -> dict[str, Any]:
+    dest = whatsapp_digits(to)
+    source = whatsapp_digits(software_number())
+    _ensure_web_worker()
+    _web_jobs.put(
+        {"to": dest, "text": text, "token": token, "origin": origin, "db_path": db_path}
+    )
+    return {
+        "from": f"+{source}" if source else software_number(),
+        "to": f"+{dest}" if dest else "",
+        "provider": "whatsapp-web",
+        "ok": True,
+        "error": "",
+        "queued": True,
+    }
+
+
 def _read_response(request: urllib.request.Request) -> tuple[bool, str]:
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
@@ -119,7 +290,13 @@ def _read_response(request: urllib.request.Request) -> tuple[bool, str]:
         return False, str(extra)
 
 
-def send_text(to: str | None, text: str) -> dict[str, Any]:
+def send_text(
+    to: str | None,
+    text: str,
+    token: str = "",
+    origin: str = "",
+    db_path: Path | None = None,
+) -> dict[str, Any]:
     """Push a WhatsApp text from the software line to the customer."""
     dest = whatsapp_digits(to or software_number())
     source = whatsapp_digits(software_number())
@@ -190,5 +367,12 @@ def send_text(to: str | None, text: str) -> dict[str, Any]:
         result["error"] = "" if ok else (body or "ارسال وب‌هوک ناموفق بود.")
         return result
 
-    result["error"] = "واتساپ نرم‌افزار برای ارسال خودکار تنظیم نشده است."
+    if _can_use_whatsapp_web():
+        if os.environ.get("WHATSAPP_WEB_INLINE") == "1":
+            return send_via_whatsapp_web(dest, text)
+        return enqueue_whatsapp_web(dest, text, token=token, origin=origin, db_path=db_path)
+
+    result["error"] = (
+        "واتساپ وب روی این رایانه در دسترس نیست. روی ویندوز، https://web.whatsapp.com را باز بگذارید."
+    )
     return result

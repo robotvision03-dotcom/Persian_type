@@ -117,7 +117,9 @@ function showInvite(invite) {
   const from = invite.from_number || "+989032901549";
   const sent = invite.whatsapp_sent || {};
   if (sent.ok) {
-    $("invite-text").textContent = `لینک تقویم از واتساپ ${from} برای مشتری ارسال شد.`;
+    $("invite-text").textContent = sent.queued
+      ? `لینک تقویم از واتساپ وب ${from} در حال ارسال است. پنجره واتساپ را باز بگذارید و این رایانه را جلو بگذارید.`
+      : `لینک تقویم از واتساپ ${from} برای مشتری ارسال شد.`;
   } else if (sent.error) {
     $("invite-text").textContent = `ارسال خودکار واتساپ از ${from} انجام نشد. ${sent.error}`;
   } else {

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from app.booking import create_invite, due_reminders, init_db
 from app.server import process_due_reminders
-from app.whatsapp import attach_message, send_text, software_number
+from app.whatsapp import attach_message, send_text, send_via_whatsapp_web, software_number, web_send_url
 
 
 class WhatsAppSendTests(unittest.TestCase):
@@ -82,6 +82,31 @@ class WhatsAppSendTests(unittest.TestCase):
             self.assertEqual(due_reminders(now=datetime(2026, 9, 4, 11, 0, 0), db_path=db_path), [])
             leftover = invite["token"]
             self.assertTrue(leftover)
+
+    def test_web_send_url_goes_to_customer(self):
+        url = web_send_url("+989032901549", "سلام تست")
+        self.assertIn("web.whatsapp.com/send", url)
+        self.assertIn("989032901549", url)
+        self.assertIn("%D8%B3%D9%84%D8%A7%D9%85", url)
+
+    def test_windows_web_session_is_used_without_api(self):
+        with patch("app.whatsapp.send_via_whatsapp_web", return_value={"ok": True, "provider": "whatsapp-web"}):
+            with patch("app.whatsapp._can_use_whatsapp_web", return_value=True):
+                result = send_text("+989032901549", "لینک تقویم")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["provider"], "whatsapp-web")
+        self.assertTrue(result["queued"])
+
+    def test_whatsapp_web_opens_chat_and_presses_send(self):
+        with patch("app.whatsapp._open_whatsapp_tab", return_value="chrome") as opened:
+            with patch("app.whatsapp._press_send") as pressed:
+                with patch("app.whatsapp.time.sleep"):
+                    result = send_via_whatsapp_web("+989032901549", "سلام")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["provider"], "whatsapp-web")
+        opened.assert_called_once()
+        self.assertIn("989032901549", opened.call_args[0][0])
+        pressed.assert_called_once()
 
 
 if __name__ == "__main__":
