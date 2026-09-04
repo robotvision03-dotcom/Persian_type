@@ -15,29 +15,21 @@ class OllamaHelperTests(unittest.TestCase):
         self.assertIn("فارسی", prompt)
 
     def test_resolve_prefers_installed_names(self):
-        available = ["qwen2.5:14b", "llama3.2:3b", "unused:latest"]
-        self.assertEqual(resolve_test_models(available), ["qwen2.5:14b", "llama3.2:3b"])
+        available = ["llama3.2:3b", "unused:latest"]
+        self.assertEqual(resolve_test_models(available), ["llama3.2:3b"])
 
     def test_models_compare_speed_and_persian(self):
         def fake_list(_host=None):
-            return ["qwen2.5:14b", "llama3.2:3b"]
+            return ["llama3.2:3b"]
 
         replies = [
             {
-                "model": "qwen2.5:14b",
-                "text": "سلام، خوبی؟",
-                "ms": 1200,
-                "eval_count": 20,
-                "tokens_per_sec": 10.0,
-                "persian_ratio": 1.0,
-            },
-            {
                 "model": "llama3.2:3b",
-                "text": "Hello there friend",
+                "text": "سلام، خوبی؟",
                 "ms": 80,
                 "eval_count": 12,
                 "tokens_per_sec": 40.0,
-                "persian_ratio": 0.0,
+                "persian_ratio": 1.0,
             },
         ]
 
@@ -49,8 +41,8 @@ class OllamaHelperTests(unittest.TestCase):
         ):
             payload = test_models("سلام")
         self.assertEqual(payload["fastest"], "llama3.2:3b")
-        self.assertEqual(payload["most_persian"], "qwen2.5:14b")
-        self.assertEqual(len(payload["results"]), 2)
+        self.assertEqual(payload["most_persian"], "llama3.2:3b")
+        self.assertEqual(len(payload["results"]), 1)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,8 @@ import urllib.request
 from typing import Any
 
 DEFAULT_HOST = "http://127.0.0.1:11434"
-DEFAULT_MODELS = ("qwen2.5:14b", "llama3.2:3b")
+DEFAULT_MODEL = "llama3.2:3b"
+DEFAULT_MODELS = (DEFAULT_MODEL,)
 
 
 class OllamaError(RuntimeError):
@@ -107,6 +108,25 @@ def generate(model: str, prompt: str, host: str | None = None) -> dict[str, Any]
     }
 
 
+def extract_answer(phase: str, spoken: str, host: str | None = None) -> str:
+    """Use llama3.2:3b to clean a spoken Persian answer for the current booking step."""
+    instructions = {
+        "car": "فقط نام خودرو یا برند را بنویس؛ مثلاً پژو یا سمند.",
+        "model": "فقط مدل خودرو را بنویس؛ مثلاً پارس یا ۲۰۶.",
+        "km": "فقط عدد کارکرد به کیلومتر را بنویس.",
+        "name": "فقط نام و نام خانوادگی را بنویس.",
+        "slot": "اگر مشتری موافق است فقط بله بنویس. اگر ساعت گفت فقط همان ساعت مثل 09:30.",
+    }
+    prompt = (
+        "تو منشی دفتر کارشناسی خودرو هستی. جواب را خیلی کوتاه و فقط به فارسی بنویس.\n"
+        f"{instructions.get(phase, 'جواب کوتاه بده.')}\n"
+        f"گفته مشتری: {spoken.strip()}\n"
+    )
+    result = generate(DEFAULT_MODEL, prompt, host=host)
+    text = (result.get("text") or "").strip().splitlines()[0].strip()
+    return text.strip(" .،")
+
+
 def resolve_test_models(available: list[str] | None = None) -> list[str]:
     wanted = configured_models()
     if available is None:
@@ -131,8 +151,7 @@ def test_models(transcript: str, models: list[str] | None = None, host: str | No
     selected = models if models is not None else resolve_test_models(available)
     if not selected:
         raise OllamaError(
-            "مدل‌های qwen2.5:14b و llama3.2:3b در Ollama پیدا نشدند. "
-            "با ollama list بررسی کنید."
+            "مدل llama3.2:3b در Ollama پیدا نشد. با ollama list بررسی کنید."
         )
     prompt = build_eval_prompt(text)
     results = []

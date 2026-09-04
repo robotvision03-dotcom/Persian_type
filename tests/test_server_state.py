@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import numpy as np
 
+from app.dialogue import GREETING
 from app.server import AppState
 
 
@@ -12,7 +13,7 @@ class DummyEngine:
     supports_stream = False
 
     def transcribe(self, audio, sample_rate=16000):
-        return "سلام دنیا"
+        return "پژو"
 
     def start_stream(self):
         return None
@@ -40,38 +41,32 @@ class AppStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             make_shenava_dir(root)
-            vosk = root / "vosk-model-fa"
-            vosk.mkdir()
-            (vosk / "am").mkdir()
-            (vosk / "am" / "final.mdl").write_bytes(b"x")
-            app_state = AppState(root)
+            db_path = root / "book.sqlite"
+            app_state = AppState(root, db_path=db_path)
             snapshot = app_state.snapshot()
             self.assertEqual(snapshot["asr"]["id"], "shenava-koochik-ctc")
-            self.assertFalse(snapshot["ready"])
+            self.assertEqual(snapshot["llm_model"], "llama3.2:3b")
 
     def test_boot_and_transcribe(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             make_shenava_dir(root)
-            app_state = AppState(root)
+            app_state = AppState(root, db_path=root / "book.sqlite")
             dummy = DummyEngine()
             with patch("app.server.load_engine", return_value=dummy):
                 snapshot = app_state.boot()
                 self.assertTrue(snapshot["ready"])
-                audio = np.zeros(16000, dtype=np.float32)
-                result = app_state.transcribe_current(audio)
-            self.assertEqual(result["text"], "سلام دنیا")
-            self.assertEqual(app_state.last_transcript, "سلام دنیا")
+                text = app_state.transcribe(np.zeros(16000, dtype=np.float32))
+            self.assertEqual(text, "پژو")
 
-    def test_boot_without_shenava(self):
+    def test_boot_without_shenava_still_allows_text_call(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            piper = root / "piper-voice-fa"
-            piper.mkdir()
-            (piper / "voice.onnx.json").write_text("{}")
-            app_state = AppState(root)
-            with self.assertRaises(Exception):
-                app_state.boot()
+            app_state = AppState(root, db_path=root / "book.sqlite")
+            snapshot = app_state.boot()
+            self.assertFalse(snapshot["ready"])
+            started = app_state.dialogue.start("x")
+            self.assertEqual(started["reply"], GREETING)
 
 
 if __name__ == "__main__":

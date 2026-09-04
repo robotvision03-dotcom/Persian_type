@@ -15,5 +15,7 @@ models/*
 !models/.gitkeep
 !models/README.md
 last_recording.wav
+data/*.sqlite
+data/*.sqlite-journal
 .DS_Store
 Thumbs.db

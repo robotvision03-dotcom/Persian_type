@@ -1,32 +1,56 @@
-"""FastAPI server for Shenava CTC dictation and Ollama LLM tests."""
+"""FastAPI server: Persian call simulator + Jalali calendar + Shenava ASR."""
 
 from __future__ import annotations
 
 import threading
-import time
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
-import numpy as np
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .audio import TARGET_RATE, concat, int16_bytes_to_float32, load_audio_file
+from .audio import TARGET_RATE, concat, int16_bytes_to_float32
+from .booking import (
+    available_slots,
+    book_appointment,
+    init_db,
+    is_office_open,
+    list_appointments,
+    month_calendar,
+    slot_times,
+)
+from .dialogue import DialogueManager
 from .discovery import ModelInfo, find_models_dir, find_shenava_ctc, scan_models
 from .engines import Engine, TranscriptionError, load_engine
-from .ollama import OllamaError, configured_models, test_models
+from .jalali import to_jalali
+from datetime import date
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
-class LlmTestBody(BaseModel):
-    text: str = Field(..., min_length=1)
+class StartBody(BaseModel):
+    session_id: str = ""
+
+
+class TurnBody(BaseModel):
+    session_id: str = Field(..., min_length=1)
+    text: str = ""
+
+
+class BookBody(BaseModel):
+    customer_name: str = Field(..., min_length=1)
+    car_name: str = Field(..., min_length=1)
+    car_model: str = Field(..., min_length=1)
+    km: int | None = None
+    date: str
+    time: str
 
 
 class AppState:
-    def __init__(self, models_dir: str | Path | None = None) -> None:
+    def __init__(self, models_dir: str | Path | None = None, db_path: Path | None = None) -> None:
         self.lock = threading.RLock()
         self.models_dir = find_models_dir(models_dir)
         self.models: list[ModelInfo] = []
@@ -34,10 +58,9 @@ class AppState:
         self.engine: Engine | None = None
         self.loading = False
         self.status = "آماده"
-        self.last_audio: np.ndarray | None = None
-        self.last_transcript = ""
-        self.last_asr_ms: int | None = None
-        self.llm_results: dict[str, Any] | None = None
+        self.dialogue = DialogueManager(db_path=db_path)
+        self.db_path = db_path
+        init_db(db_path)
         self.refresh()
 
     def refresh(self) -> None:
@@ -47,13 +70,14 @@ class AppState:
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
             asr = self.asr
+            today = date.today()
+            jy, jm, _jd = to_jalali(today)
             return {
                 "models_dir": str(self.models_dir),
                 "asr": None
                 if asr is None
                 else {
                     "id": asr.id,
-                    "name": asr.name,
                     "name_fa": asr.name_fa,
                     "engine": asr.engine,
                     "note": asr.note,
@@ -61,11 +85,10 @@ class AppState:
                 "ready": self.engine is not None,
                 "loading": self.loading,
                 "status": self.status,
-                "has_last_audio": self.last_audio is not None and self.last_audio.size > 0,
-                "last_transcript": self.last_transcript,
-                "last_asr_ms": self.last_asr_ms,
-                "llm": self.llm_results,
-                "ollama_models": configured_models(),
+                "llm_model": "llama3.2:3b",
+                "hours": "۰۹:۰۰ تا ۱۷:۰۰",
+                "open_days": "دوشنبه تا جمعه",
+                "today_jalali": {"year": jy, "month": jm},
             }
 
     def boot(self) -> dict[str, Any]:
@@ -73,23 +96,13 @@ class AppState:
             self.refresh()
             info = self.asr
             if info is None:
-                self.status = "پوشه shenava-koochik-ctc پیدا نشد."
-                raise HTTPException(
-                    status_code=404,
-                    detail="مدل شنوا کوچیک CTC پیدا نشد. پوشه shenava-koochik-ctc را در models بگذارید.",
-                )
+                self.status = "شنوا کوچیک CTC پیدا نشد؛ تماس متنی فعال است."
+                return self.snapshot()
             if self.engine is not None:
                 self.status = f"مدل آماده است: {info.name_fa}"
                 return self.snapshot()
             self.loading = True
             self.status = f"در حال بارگذاری {info.name_fa}..."
-            previous = self.engine
-
-        if previous is not None:
-            try:
-                previous.close()
-            except Exception:
-                pass
 
         try:
             engine = load_engine(info)
@@ -98,14 +111,13 @@ class AppState:
                 self.loading = False
                 self.engine = None
                 self.status = str(extra)
-            raise HTTPException(status_code=500, detail=str(extra)) from extra
+            return self.snapshot()
         except Exception as extra:
-            message = f"بارگذاری مدل ناموفق بود: {extra}"
             with self.lock:
                 self.loading = False
                 self.engine = None
-                self.status = message
-            raise HTTPException(status_code=500, detail=message) from extra
+                self.status = f"بارگذاری مدل ناموفق بود: {extra}"
+            return self.snapshot()
 
         with self.lock:
             self.engine = engine
@@ -113,69 +125,21 @@ class AppState:
             self.status = f"مدل آماده است: {info.name_fa}"
             return self.snapshot()
 
-    def remember_audio(self, audio: np.ndarray) -> None:
-        with self.lock:
-            self.last_audio = np.asarray(audio, dtype=np.float32).copy()
-
-    def transcribe_current(self, audio: np.ndarray | None = None) -> dict[str, Any]:
+    def transcribe(self, audio) -> str:
         with self.lock:
             engine = self.engine
-            info = self.asr
-            if audio is None:
-                audio = self.last_audio
-            if engine is None or info is None:
-                raise HTTPException(status_code=400, detail="مدل شنوا کوچیک CTC هنوز بارگذاری نشده است.")
-            if audio is None or audio.size == 0:
-                raise HTTPException(status_code=400, detail="صوتی برای رونویسی وجود ندارد.")
-            self.status = f"در حال رونویسی با {info.name_fa}..."
-
-        started = time.perf_counter()
-        try:
-            text = engine.transcribe(audio, TARGET_RATE)
-        except Exception as extra:
-            with self.lock:
-                self.status = f"خطا در رونویسی: {extra}"
-            raise HTTPException(status_code=500, detail=str(extra)) from extra
-        elapsed_ms = int((time.perf_counter() - started) * 1000)
-
-        with self.lock:
-            self.last_transcript = text
-            self.last_asr_ms = elapsed_ms
-            self.status = "رونویسی تمام شد."
-            return {
-                "model_id": info.id,
-                "model": info.name_fa,
-                "text": text,
-                "ms": elapsed_ms,
-                "state": self.snapshot(),
-            }
-
-    def run_llm_test(self, text: str) -> dict[str, Any]:
-        cleaned = text.strip()
-        if not cleaned:
-            raise HTTPException(status_code=400, detail="متنی برای آزمایش LLM وجود ندارد.")
-        with self.lock:
-            self.status = "در حال آزمایش مدل‌های Ollama..."
-            self.last_transcript = cleaned
-        try:
-            payload = test_models(cleaned)
-        except OllamaError as extra:
-            with self.lock:
-                self.status = str(extra)
-            raise HTTPException(status_code=503, detail=str(extra)) from extra
-        with self.lock:
-            self.llm_results = payload
-            self.status = "آزمایش LLM تمام شد."
-            return {"llm": payload, "state": self.snapshot()}
+        if engine is None:
+            raise HTTPException(status_code=400, detail="مدل شنوا برای تماس صوتی بارگذاری نشده است.")
+        return engine.transcribe(audio, TARGET_RATE)
 
 
 state = AppState()
-app = FastAPI(title="تایپ گفتاری فارسی", version="1.1.0")
+app = FastAPI(title="رزرو نوبت نمایندگی خودرو", version="2.0.0")
 
 
-def reset_state(models_dir: str | Path | None = None) -> AppState:
+def reset_state(models_dir: str | Path | None = None, db_path: Path | None = None) -> AppState:
     global state
-    state = AppState(models_dir)
+    state = AppState(models_dir, db_path=db_path)
     return state
 
 
@@ -195,42 +159,74 @@ def boot_asr() -> dict[str, Any]:
     return state.boot()
 
 
-@app.post("/api/transcribe")
-async def transcribe_upload(file: UploadFile = File(...)) -> dict[str, Any]:
-    data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="فایل خالی است.")
+@app.post("/api/call/start")
+def call_start(body: StartBody | None = None) -> dict[str, Any]:
+    session_id = (body.session_id if body and body.session_id else None) or str(uuid4())
+    payload = state.dialogue.start(session_id)
+    payload["session_id"] = session_id
+    return payload
+
+
+@app.post("/api/call/turn")
+def call_turn(body: TurnBody) -> dict[str, Any]:
+    payload = state.dialogue.handle(body.session_id, body.text)
+    payload["session_id"] = body.session_id
+    return payload
+
+
+@app.get("/api/calendar")
+def get_calendar(year: int | None = None, month: int | None = None) -> dict[str, Any]:
+    return month_calendar(year, month, db_path=state.db_path)
+
+
+@app.get("/api/slots")
+def get_slots(date: str) -> dict[str, Any]:
+    from datetime import date as date_cls
+
+    parsed = date_cls.fromisoformat(date)
+    return {
+        "date": date,
+        "all": slot_times() if is_office_open(parsed) else [],
+        "slots": available_slots(date, db_path=state.db_path),
+        "open": is_office_open(parsed),
+    }
+
+
+@app.get("/api/appointments")
+def get_appointments() -> list[dict[str, Any]]:
+    return list_appointments(db_path=state.db_path)
+
+
+@app.post("/api/book")
+def post_book(body: BookBody) -> dict[str, Any]:
     try:
-        audio = load_audio_file(data, file.filename or "audio.wav")
-    except RuntimeError as extra:
-        raise HTTPException(status_code=400, detail=str(extra)) from extra
-    state.remember_audio(audio)
-    return state.transcribe_current(audio)
-
-
-@app.post("/api/transcribe-last")
-def transcribe_last() -> dict[str, Any]:
-    return state.transcribe_current()
-
-
-@app.post("/api/llm-test")
-def llm_test(body: LlmTestBody) -> dict[str, Any]:
-    return state.run_llm_test(body.text)
+        appt_id = book_appointment(
+            body.customer_name,
+            body.car_name,
+            body.car_model,
+            body.km,
+            body.date,
+            body.time,
+            db_path=state.db_path,
+        )
+    except ValueError as extra:
+        raise HTTPException(status_code=409, detail=str(extra)) from extra
+    return {"ok": True, "id": appt_id, "message": "نوبت در فهرست مشتریان ثبت شد."}
 
 
 @app.websocket("/ws/stream")
 async def stream_transcription(websocket: WebSocket) -> None:
     await websocket.accept()
-    chunks: list[np.ndarray] = []
+    chunks = []
+    session_id = ""
     engine: Engine | None = None
     with state.lock:
         engine = state.engine
         if engine is None:
-            await websocket.send_json({"type": "error", "message": "مدل شنوا هنوز بارگذاری نشده است."})
+            await websocket.send_json({"type": "error", "message": "مدل شنوا برای تماس صوتی آماده نیست. متن را تایپ کنید."})
             await websocket.close()
             return
         engine.start_stream()
-        state.status = "در حال گوش دادن..."
 
     try:
         await websocket.send_json({"type": "status", "message": "گوش می‌دهم..."})
@@ -241,8 +237,19 @@ async def stream_transcription(websocket: WebSocket) -> None:
             data = message.get("bytes")
             text = message.get("text")
             if text:
-                payload = text.strip().lower()
-                if payload in {"stop", "end"}:
+                raw = text.strip()
+                if raw.startswith("{"):
+                    import json
+
+                    try:
+                        payload = json.loads(raw)
+                        session_id = payload.get("session_id") or session_id
+                        if payload.get("type") in {"stop", "end"}:
+                            break
+                    except json.JSONDecodeError:
+                        if raw.lower() in {"stop", "end"}:
+                            break
+                elif raw.lower() in {"stop", "end"}:
                     break
                 continue
             if not data:
@@ -258,36 +265,27 @@ async def stream_transcription(websocket: WebSocket) -> None:
         pass
     finally:
         full = concat(chunks)
-        if full.size:
-            state.remember_audio(full)
+        text_out = ""
         if engine is not None:
             try:
                 if engine.supports_stream:
                     engine.end_stream()
                 if full.size:
-                    result = state.transcribe_current(full)
-                    await websocket.send_json(
-                        {
-                            "type": "final",
-                            "text": result["text"],
-                            "ms": result["ms"],
-                            "model_id": result["model_id"],
-                            "model": result["model"],
-                            "state": result["state"],
-                        }
-                    )
-                else:
-                    await websocket.send_json({"type": "final", "text": "", "ms": 0})
-            except HTTPException as extra:
-                try:
-                    await websocket.send_json({"type": "error", "message": extra.detail})
-                except Exception:
-                    pass
+                    text_out = state.transcribe(full)
             except Exception as extra:
-                try:
-                    await websocket.send_json({"type": "error", "message": str(extra)})
-                except Exception:
-                    pass
+                await websocket.send_json({"type": "error", "message": str(extra)})
+                await websocket.close()
+                return
+        turn = None
+        if text_out and session_id:
+            turn = state.dialogue.handle(session_id, text_out)
+        await websocket.send_json(
+            {
+                "type": "final",
+                "text": text_out,
+                "turn": turn,
+            }
+        )
         try:
             await websocket.close()
         except Exception:

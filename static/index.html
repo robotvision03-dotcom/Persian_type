@@ -3,89 +3,77 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>تایپ گفتاری فارسی</title>
+    <title>رزرو نوبت نمایندگی خودرو</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/static/styles.css?v=2" />
+    <link rel="stylesheet" href="/static/styles.css?v=3" />
   </head>
   <body>
     <div class="backdrop"></div>
-    <main class="shell">
-      <header class="hero">
-        <p class="eyebrow">Persian Type</p>
-        <h1>تایپ گفتاری فارسی</h1>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Call Simulator</p>
+        <h1>رزرو نوبت کارشناسی خودرو</h1>
         <p class="lede">
-          گفتار با مدل شنوا کوچیک CTC به متن تبدیل می‌شود. بعد همان متن برای آزمایش سرعت و دقت به
-          <strong>qwen2.5:14b</strong>
-          و
+          مشتری تماس می‌گیرد. منشی با
           <strong>llama3.2:3b</strong>
-          در Ollama فرستاده می‌شود.
+          و شنوا کوچیک CTC به فارسی نوبت می‌گیرد. دفتر دوشنبه تا جمعه، ساعت ۹ تا ۱۷.
         </p>
-        <div class="meta-row">
-          <span id="asr-chip" class="path-chip">شنوا کوچیک CTC</span>
-          <span id="models-path" class="path-chip">...</span>
-        </div>
-      </header>
+      </div>
+      <div class="pills">
+        <span id="asr-chip" class="path-chip">شنوا کوچیک CTC</span>
+        <span class="path-chip">llama3.2:3b</span>
+        <span id="status-line" class="path-chip">آماده</span>
+      </div>
+    </header>
 
-      <section class="panel">
+    <main class="workspace dealership">
+      <section class="panel call-panel">
         <div class="panel-head">
-          <h2>وضعیت</h2>
-          <p id="status-line" class="status">در حال آماده‌سازی...</p>
+          <h2>شبیه‌ساز تماس</h2>
+          <button type="button" id="new-call" class="ghost">تماس جدید</button>
         </div>
-        <p id="asr-note" class="hint"></p>
+        <div id="log" class="call-log"></div>
+        <form id="composer" class="composer">
+          <button type="button" id="start-btn" class="start" disabled>صحبت کن</button>
+          <button type="button" id="stop-btn" class="stop" disabled>توقف</button>
+          <input id="text-input" type="text" placeholder="پاسخ مشتری را بنویسید..." autocomplete="off" />
+          <button type="submit" class="ghost">ارسال</button>
+        </form>
+        <div class="meter"><span id="level-bar"></span></div>
+        <p id="partial-line" class="partial"></p>
       </section>
 
-      <section class="controls-row">
-        <button type="button" id="start-btn" class="start" disabled>شروع</button>
-        <button type="button" id="stop-btn" class="stop" disabled>توقف</button>
-        <label class="upload">
-          فایل صوتی
-          <input id="file-input" type="file" accept="audio/*,.wav,.flac,.ogg" />
-        </label>
-        <button type="button" id="llm-btn" class="ghost" disabled>آزمایش LLM</button>
-        <div class="meter" aria-hidden="true">
-          <span id="level-bar"></span>
-        </div>
-      </section>
+      <div class="side">
+        <section class="panel">
+          <div class="cal-nav">
+            <button type="button" id="prev-m" class="ghost">ماه قبل</button>
+            <strong id="month-title">تقویم دفتر</strong>
+            <button type="button" id="next-m" class="ghost">ماه بعد</button>
+          </div>
+          <div class="weekdays" id="weekdays"></div>
+          <div class="weeks" id="weeks"></div>
+          <p id="day-label" class="hint">روزهای دوشنبه تا جمعه باز است. نقطه یعنی نوبت خالی دارد.</p>
+          <div id="times" class="times"></div>
+        </section>
 
-      <section class="workspace">
-        <article class="panel transcript-panel">
+        <section class="panel">
           <div class="panel-head">
-            <h2>متن تایپ‌شده</h2>
-            <div class="actions">
-              <span id="asr-time" class="hint"></span>
-              <button type="button" id="copy-btn" class="ghost">کپی</button>
-              <button type="button" id="clear-btn" class="ghost">پاک کردن</button>
-            </div>
+            <h2>فهرست مشتریان</h2>
+            <button type="button" id="refresh-list" class="ghost">بروزرسانی</button>
           </div>
-          <p id="partial-line" class="partial"></p>
-          <textarea
-            id="transcript"
-            class="transcript"
-            placeholder="متن فارسی اینجا ظاهر می‌شود..."
-            spellcheck="false"
-          ></textarea>
-        </article>
-
-        <article class="panel compare-panel">
-          <div class="panel-head">
-            <h2>آزمایش LLM</h2>
-            <p class="hint">مقایسه سرعت و دقت qwen2.5:14b و llama3.2:3b</p>
-          </div>
-          <div id="compare-list" class="compare-list">
-            <p class="hint">بعد از رونویسی، دکمه آزمایش LLM را بزنید.</p>
-          </div>
-        </article>
-      </section>
+          <div id="appts" class="empty">هنوز نوبتی ثبت نشده است.</div>
+        </section>
+      </div>
     </main>
     <div id="overlay" class="overlay hidden">
       <div class="spinner"></div>
-      <p id="overlay-text">در حال بارگذاری مدل...</p>
+      <p id="overlay-text">در حال آماده‌سازی...</p>
     </div>
-    <script src="/static/app.js?v=2"></script>
+    <script src="/static/app.js?v=3"></script>
   </body>
 </html>

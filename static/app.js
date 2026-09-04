@@ -1,24 +1,23 @@
 const $ = (id) => document.getElementById(id);
 
+const MONTHS = ["فروردین","اردیبهشت","خرداد","تیر","مرداد","شهریور","مهر","آبان","آذر","دی","بهمن","اسفند"];
+const sessionId = "call-" + Math.random().toString(36).slice(2, 8);
+
+const logEl = $("log");
+const textInput = $("text-input");
 const statusLine = $("status-line");
-const modelsPath = $("models-path");
 const asrChip = $("asr-chip");
-const asrNote = $("asr-note");
-const asrTime = $("asr-time");
 const startBtn = $("start-btn");
 const stopBtn = $("stop-btn");
-const llmBtn = $("llm-btn");
-const copyBtn = $("copy-btn");
-const clearBtn = $("clear-btn");
-const fileInput = $("file-input");
-const transcript = $("transcript");
 const partialLine = $("partial-line");
-const compareList = $("compare-list");
 const overlay = $("overlay");
 const overlayText = $("overlay-text");
 const levelBar = $("level-bar");
 
 let state = null;
+let cal = { year: null, month: null };
+let selectedDate = null;
+let selectedTime = null;
 let socket = null;
 let mediaStream = null;
 let audioContext = null;
@@ -32,80 +31,167 @@ function setOverlay(visible, message) {
 }
 
 function escapeHtml(value) {
-  return String(value)
+  return String(value || "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
 }
 
-function renderLlm() {
-  const llm = state?.llm;
-  if (!llm?.results?.length) {
-    compareList.innerHTML = `<p class="hint">بعد از رونویسی، دکمه آزمایش LLM را بزنید.</p>`;
-    return;
-  }
-  compareList.innerHTML = llm.results
-    .map((item) => {
-      const badges = [];
-      if (llm.fastest === item.model) badges.push("سریع‌تر");
-      if (llm.most_persian === item.model) badges.push("فارسی‌تر");
-      const badgeHtml = badges
-        .map((label) => `<span class="engine-tag">${escapeHtml(label)}</span>`)
-        .join(" ");
-      const speed = item.ms ? `${item.ms} میلی‌ثانیه` : "";
-      const tps = item.tokens_per_sec ? `${item.tokens_per_sec} توکن/ثانیه` : "";
-      const ratio =
-        item.persian_ratio != null ? `نسبت فارسی ${(item.persian_ratio * 100).toFixed(0)}٪` : "";
-      return `
-        <article class="compare-card">
-          <h3>${escapeHtml(item.model)} ${badgeHtml}</h3>
-          <p>${escapeHtml(item.text || "بدون پاسخ")}</p>
-          <div class="time">${[speed, tps, ratio].filter(Boolean).join(" · ")}</div>
-        </article>
-      `;
-    })
-    .join("");
+function addMsg(role, text, meta) {
+  const div = document.createElement("div");
+  div.className = "msg " + role;
+  div.innerHTML = `<div class="meta">${escapeHtml(meta || (role === "agent" ? "منشی" : "مشتری"))}</div>${escapeHtml(text)}`;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
 }
 
 function applyState(next) {
   state = next;
-  modelsPath.textContent = next.models_dir || "";
+  if (next.asr) asrChip.textContent = next.asr.name_fa || "شنوا کوچیک CTC";
   statusLine.textContent = next.status || "";
-  if (next.asr) {
-    asrChip.textContent = next.asr.name_fa || "شنوا کوچیک CTC";
-    asrNote.textContent = next.asr.note || "";
-  }
-  if (next.last_asr_ms != null) {
-    asrTime.textContent = `${next.last_asr_ms} میلی‌ثانیه`;
-  }
   startBtn.disabled = !next.ready || recording;
-  llmBtn.disabled = !(transcript.value || "").trim();
-  renderLlm();
 }
 
 async function fetchState() {
   const response = await fetch("/api/state");
-  if (!response.ok) throw new Error("خواندن وضعیت ناموفق بود");
   applyState(await response.json());
 }
 
-function applyTranscriptResult(payload) {
-  if (payload.text) {
-    transcript.value = joinText(transcript.value, payload.text);
-  }
-  if (payload.state) applyState(payload.state);
-  llmBtn.disabled = !(transcript.value || "").trim();
-  partialLine.textContent = "";
+async function startCall() {
+  logEl.innerHTML = "";
+  const payload = await fetch("/api/call/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, text: "" }),
+  }).then((r) => r.json());
+  addMsg("agent", payload.reply, "منشی");
 }
 
-function joinText(current, next) {
-  const left = (current || "").trim();
-  const right = (next || "").trim();
-  if (!left) return right;
-  if (!right) return left;
-  return `${left}\n${right}`;
+$("composer").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const text = textInput.value.trim();
+  if (!text) return;
+  addMsg("user", text, "مشتری");
+  textInput.value = "";
+  const payload = await fetch("/api/call/turn", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, text }),
+  }).then((r) => r.json());
+  addMsg("agent", payload.reply, "منشی");
+  if (payload.appointment_id) loadAppts();
+  loadCalendar();
+});
+
+$("new-call").addEventListener("click", async () => {
+  if (recording) await stopRecording();
+  await startCall();
+});
+
+$("weekdays").innerHTML = ["ش", "ی", "د", "س", "چ", "پ", "ج"].map((d) => `<span>${d}</span>`).join("");
+
+async function loadCalendar() {
+  const query = cal.year ? `?year=${cal.year}&month=${cal.month}` : "";
+  const data = await fetch("/api/calendar" + query).then((r) => r.json());
+  cal.year = data.year;
+  cal.month = data.month;
+  $("month-title").textContent = `${data.month_name || MONTHS[data.month - 1]} ${data.year}`;
+  const weeks = $("weeks");
+  weeks.innerHTML = "";
+  data.weeks.flat().forEach((cell) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "day";
+    if (!cell) {
+      btn.disabled = true;
+      weeks.appendChild(btn);
+      return;
+    }
+    btn.textContent = cell.jalali_day;
+    if (!cell.open) {
+      btn.classList.add("closed");
+      btn.disabled = true;
+    }
+    if (cell.today) btn.classList.add("today");
+    if (cell.date === selectedDate) btn.classList.add("sel");
+    if (cell.free_count > 0) {
+      const dot = document.createElement("span");
+      dot.className = "dot";
+      btn.appendChild(dot);
+    }
+    btn.addEventListener("click", () => selectDay(cell.date));
+    weeks.appendChild(btn);
+  });
 }
+
+async function selectDay(iso) {
+  selectedDate = iso;
+  selectedTime = null;
+  await loadCalendar();
+  const data = await fetch("/api/slots?date=" + encodeURIComponent(iso)).then((r) => r.json());
+  $("day-label").textContent = data.open
+    ? `ساعت‌های خالی ${iso} — دوشنبه تا جمعه ۹ تا ۱۷`
+    : "این روز دفتر تعطیل است.";
+  const box = $("times");
+  box.innerHTML = "";
+  (data.all || []).forEach((time) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = time;
+    const free = (data.slots || []).includes(time);
+    if (!free) {
+      btn.className = "busy";
+      btn.disabled = true;
+    }
+    btn.addEventListener("click", () => {
+      selectedTime = time;
+      [...box.querySelectorAll("button")].forEach((el) => el.classList.remove("pick"));
+      btn.classList.add("pick");
+    });
+    box.appendChild(btn);
+  });
+  if (!(data.all || []).length) box.innerHTML = "<p class='hint'>این روز دفتر باز نیست.</p>";
+}
+
+$("prev-m").addEventListener("click", () => {
+  cal.month -= 1;
+  if (cal.month < 1) {
+    cal.month = 12;
+    cal.year -= 1;
+  }
+  loadCalendar();
+});
+
+$("next-m").addEventListener("click", () => {
+  cal.month += 1;
+  if (cal.month > 12) {
+    cal.month = 1;
+    cal.year += 1;
+  }
+  loadCalendar();
+});
+
+async function loadAppts() {
+  const rows = await fetch("/api/appointments").then((r) => r.json());
+  const el = $("appts");
+  if (!rows.length) {
+    el.className = "empty";
+    el.textContent = "هنوز نوبتی ثبت نشده است.";
+    return;
+  }
+  el.className = "";
+  el.innerHTML = `<table class="appts"><thead><tr><th>مشتری</th><th>خودرو</th><th>نوبت</th></tr></thead><tbody>${rows
+    .map(
+      (row) =>
+        `<tr><td>${escapeHtml(row.customer_name)}</td><td>${escapeHtml(row.car_name + " " + row.car_model)}<br><small>${
+          row.km ? row.km + " کیلومتر" : ""
+        }</small></td><td>${escapeHtml(row.jalali || row.date)}<br>${escapeHtml(row.time)}</td></tr>`
+    )
+    .join("")}</tbody></table>`;
+}
+
+$("refresh-list").addEventListener("click", loadAppts);
 
 function downsample(buffer, inRate, outRate) {
   if (inRate === outRate) return buffer;
@@ -141,7 +227,7 @@ function updateLevel(samples) {
 
 async function startRecording() {
   if (!state?.ready) {
-    alert("مدل شنوا هنوز آماده نیست.");
+    alert("برای تماس صوتی مدل شنوا لازم است. می‌توانید پاسخ را تایپ کنید.");
     return;
   }
   mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -153,36 +239,33 @@ async function startRecording() {
   const protocol = location.protocol === "https:" ? "wss" : "ws";
   socket = new WebSocket(`${protocol}://${location.host}/ws/stream`);
   socket.binaryType = "arraybuffer";
-
   await new Promise((resolve, reject) => {
     socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener("error", () => reject(new Error("اتصال زنده برقرار نشد")), {
-      once: true,
-    });
+    socket.addEventListener("error", () => reject(new Error("اتصال زنده برقرار نشد")), { once: true });
   });
-
+  socket.send(JSON.stringify({ session_id: sessionId }));
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(event.data);
-    if (message.type === "partial") {
-      partialLine.textContent = message.text || "";
-    } else if (message.type === "final") {
-      applyTranscriptResult(message);
-    } else if (message.type === "status") {
-      statusLine.textContent = message.message;
-    } else if (message.type === "error") {
-      statusLine.textContent = message.message;
+    if (message.type === "partial") partialLine.textContent = message.text || "";
+    if (message.type === "status") statusLine.textContent = message.message;
+    if (message.type === "error") statusLine.textContent = message.message;
+    if (message.type === "final") {
+      if (message.text) addMsg("user", message.text, "مشتری · گفتار");
+      if (message.turn?.reply) {
+        addMsg("agent", message.turn.reply, "منشی");
+        if (message.turn.appointment_id) loadAppts();
+        loadCalendar();
+      }
+      partialLine.textContent = "";
     }
   });
-
   processor.onaudioprocess = (event) => {
     if (!recording || !socket || socket.readyState !== WebSocket.OPEN) return;
     const input = event.inputBuffer.getChannelData(0);
     updateLevel(input);
-    const resampled = downsample(input, audioContext.sampleRate, 16000);
-    const pcm = floatTo16BitPCM(resampled);
+    const pcm = floatTo16BitPCM(downsample(input, audioContext.sampleRate, 16000));
     socket.send(pcm.buffer);
   };
-
   const mute = audioContext.createGain();
   mute.gain.value = 0;
   sourceNode.connect(processor);
@@ -191,16 +274,11 @@ async function startRecording() {
   recording = true;
   startBtn.disabled = true;
   stopBtn.disabled = false;
-  statusLine.textContent = "گوش می‌دهم... صحبت کنید.";
 }
 
 function teardownAudio() {
-  try {
-    processor && processor.disconnect();
-  } catch (_error) {}
-  try {
-    sourceNode && sourceNode.disconnect();
-  } catch (_error) {}
+  try { processor && processor.disconnect(); } catch (_error) {}
+  try { sourceNode && sourceNode.disconnect(); } catch (_error) {}
   if (audioContext) audioContext.close();
   if (mediaStream) mediaStream.getTracks().forEach((track) => track.stop());
   processor = null;
@@ -215,112 +293,34 @@ async function stopRecording() {
   stopBtn.disabled = true;
   startBtn.disabled = !state?.ready;
   if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send("stop");
+    socket.send(JSON.stringify({ type: "stop", session_id: sessionId }));
     await new Promise((resolve) => {
       const timer = setTimeout(resolve, 120000);
-      socket.addEventListener(
-        "close",
-        () => {
-          clearTimeout(timer);
-          resolve();
-        },
-        { once: true }
-      );
+      socket.addEventListener("close", () => { clearTimeout(timer); resolve(); }, { once: true });
     });
   }
   socket = null;
   teardownAudio();
 }
 
-startBtn.addEventListener("click", async () => {
-  try {
-    await startRecording();
-  } catch (error) {
-    statusLine.textContent = error.message;
-    alert(error.message);
-    teardownAudio();
-  }
-});
-
-stopBtn.addEventListener("click", () => {
-  stopRecording();
-});
-
-llmBtn.addEventListener("click", async () => {
-  const text = (transcript.value || "").trim();
-  if (!text) {
-    alert("ابتدا صحبت کنید یا متن را بنویسید.");
-    return;
-  }
-  setOverlay(true, "در حال آزمایش qwen2.5:14b و llama3.2:3b ...");
-  try {
-    const response = await fetch("/api/llm-test", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.detail || "آزمایش LLM ناموفق بود");
-    if (payload.state) applyState(payload.state);
-  } catch (error) {
-    alert(error.message);
-  } finally {
-    setOverlay(false);
-  }
-});
-
-copyBtn.addEventListener("click", async () => {
-  await navigator.clipboard.writeText(transcript.value);
-  statusLine.textContent = "متن کپی شد.";
-});
-
-clearBtn.addEventListener("click", () => {
-  transcript.value = "";
-  partialLine.textContent = "";
-  llmBtn.disabled = true;
-});
-
-fileInput.addEventListener("change", async () => {
-  const file = fileInput.files?.[0];
-  fileInput.value = "";
-  if (!file) return;
-  if (!state?.ready) {
-    alert("مدل شنوا هنوز آماده نیست.");
-    return;
-  }
-  setOverlay(true, "در حال رونویسی فایل...");
-  try {
-    const body = new FormData();
-    body.append("file", file);
-    const response = await fetch("/api/transcribe", { method: "POST", body });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.detail || "رونویسی فایل ناموفق بود");
-    applyTranscriptResult(payload);
-  } catch (error) {
-    alert(error.message);
-  } finally {
-    setOverlay(false);
-  }
-});
-
-transcript.addEventListener("input", () => {
-  llmBtn.disabled = !(transcript.value || "").trim();
-});
+startBtn.addEventListener("click", () => startRecording().catch((error) => {
+  alert(error.message);
+  teardownAudio();
+}));
+stopBtn.addEventListener("click", () => stopRecording());
 
 async function boot() {
-  setOverlay(true, "در حال بارگذاری شنوا کوچیک CTC...");
+  setOverlay(true, "در حال آماده‌سازی دفتر...");
   try {
-    const response = await fetch("/api/boot", { method: "POST" });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.detail || "بارگذاری مدل ناموفق بود");
+    const payload = await fetch("/api/boot", { method: "POST" }).then((r) => r.json());
     applyState(payload);
+    await startCall();
+    await loadCalendar();
+    await loadAppts();
   } catch (error) {
     statusLine.textContent = error.message;
-    try {
-      await fetchState();
-    } catch (_refreshError) {
-      startBtn.disabled = true;
-    }
+    await startCall();
+    await loadCalendar();
   } finally {
     setOverlay(false);
   }
