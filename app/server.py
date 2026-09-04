@@ -26,6 +26,7 @@ from .booking import (
     slot_times,
 )
 from .cars import catalog_payload, match_vehicle
+from .iranian_names import match_person_name, name_catalog_counts
 from .dialogue import DialogueManager
 from .discovery import ModelInfo, find_models_dir, find_shenava_ctc, scan_models
 from .engines import Engine, TranscriptionError, load_engine
@@ -226,6 +227,15 @@ def get_cars(q: str = "") -> dict[str, Any]:
     if q.strip():
         return {"query": q, "match": match_vehicle(q).as_dict(), "cars": catalog_payload()}
     return {"cars": catalog_payload()}
+
+
+@app.get("/api/names")
+def get_names(q: str = "") -> dict[str, Any]:
+    payload = name_catalog_counts()
+    if q.strip():
+        payload["query"] = q
+        payload["match"] = match_person_name(q).as_dict()
+    return payload
 
 
 @app.get("/api/appointments")

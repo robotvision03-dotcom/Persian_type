@@ -12,6 +12,7 @@ import re
 from typing import Any
 
 from .cars import match_vehicle
+from .iranian_names import match_person_name
 from .numbers import digitize_text, extract_ints, parse_int
 
 PHASE_ASK_CAR = "ask_car"
@@ -85,14 +86,15 @@ def parse_slots(text: str, phase: str = PHASE_ASK_CAR, prefer_brand: str = "") -
     if any(word in raw for word in NO_WORDS) and not slots["confirm"]:
         slots["confirm"] = False
 
-    hit = match_vehicle(raw, prefer_brand=prefer_brand or None)
-    if hit.brand:
-        slots["car_name"] = hit.brand
-        slots["origin"] = hit.origin
-    if hit.model:
-        slots["car_model"] = hit.model
-    if hit.candidates:
-        slots["candidates"] = hit.candidates
+    if phase != PHASE_ASK_NAME:
+        hit = match_vehicle(raw, prefer_brand=prefer_brand or None)
+        if hit.brand:
+            slots["car_name"] = hit.brand
+            slots["origin"] = hit.origin
+        if hit.model:
+            slots["car_model"] = hit.model
+        if hit.candidates:
+            slots["candidates"] = hit.candidates
 
     km = parse_km(raw)
     km_mentioned = "کیلومتر" in raw or "کیلومتر" in normalized or "km" in lowered
@@ -113,11 +115,14 @@ def parse_slots(text: str, phase: str = PHASE_ASK_CAR, prefer_brand: str = "") -
             slots["car_model"] = leftover
 
     if phase == PHASE_ASK_NAME:
-        name = normalized
+        person = match_person_name(raw)
+        name = person.full or normalized
         if slots["confirm"] is not None and len(name) <= 4:
             name = ""
         if len(name) >= 2:
             slots["customer_name"] = name
+        if person.candidates:
+            slots["candidates"] = person.candidates
 
     return slots
 

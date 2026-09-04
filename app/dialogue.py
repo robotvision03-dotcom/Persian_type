@@ -142,6 +142,8 @@ class DialogueManager:
         if nxt == session.phase:
             if session.phase == PHASE_ASK_KM:
                 return self._reply(session, text, "کارکرد را به کیلومتر بگویید. مثلاً ۸۰۰۰۰.")
+            if session.phase == PHASE_ASK_NAME:
+                return self._reply(session, text, "نام و نام خانوادگی را واضح بگویید. مثلاً علی رضایی.")
             return self._reply(session, text, ASK_REPEAT)
 
         session.phase = nxt
