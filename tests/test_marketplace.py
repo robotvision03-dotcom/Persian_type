@@ -387,6 +387,8 @@ class InspectionCatalogTests(unittest.TestCase):
             )
             self.assertEqual(hood["status"], "رنگ دارد")
             self.assertFalse(hood["ok"])
+            body_cat = next(cat for cat in item["inspection"]["categories"] if cat["id"] == "body")
+            self.assertLess(body_cat["score"], 10)
             doors = next(row for cat in item["inspection"]["categories"] if cat["id"] == "body" for row in cat["items"] if row["id"] == "front_driver_door")
             self.assertEqual(doors["status"], "سالم")
             detail = svc.buyer_auction_detail(auction["id"], buyer, db_path=path, now=when)

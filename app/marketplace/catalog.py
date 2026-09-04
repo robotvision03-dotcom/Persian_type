@@ -607,9 +607,10 @@ def normalize_report(raw: dict[str, Any] | None) -> dict[str, Any]:
             base["categories"][cat_id]["items"][item["id"]] = merged
             scored.append(1 if status_is_ok(item["kind"], merged["status"]) else 0)
         total = len(scored) or 1
-        score = max(1, round(10 * sum(scored) / total)) if scored else 10
         if sum(scored) == total:
             score = 10
+        else:
+            score = max(1, min(9, int(10 * sum(scored) / total)))
         base["categories"][cat_id]["score"] = score
         hint = incoming_cat.get("summary") or category["summary_hint"]
         if sum(scored) != total:
