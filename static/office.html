@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>دفتر مرکز</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css?v=10" />
+    <link rel="stylesheet" href="/static/portal.css?v=10" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">مرکز کارشناسی</p>
+        <h1>داشبورد دفتر</h1>
+        <p class="lede">نوبت، کارشناسی، انتشار مزایده و تأیید برنده. دفتر دروازه ارتباط با خریداران است.</p>
+      </div>
+      <div class="pills">
+        <a class="path-chip" href="/">تماس مشتری</a>
+        <a class="path-chip" href="/buyer">پورتال خریدار</a>
+      </div>
+    </header>
+    <main class="shell portal">
+      <section id="auth-box" class="panel">
+        <h2>ورود دفتر</h2>
+        <form id="login-form" class="stack">
+          <input name="email" type="email" value="office@center.local" />
+          <input name="password" type="password" value="Office123!" />
+          <button class="start" type="submit">ورود</button>
+          <p id="auth-msg" class="hint"></p>
+        </form>
+      </section>
+      <div id="app-box" class="hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>نوبت‌ها</h2>
+            <button class="ghost" id="logout-btn" type="button">خروج</button>
+          </div>
+          <form id="appt-form" class="actions">
+            <input name="date" type="date" required />
+            <input name="time" type="time" required />
+            <input name="customer_name" placeholder="نام مشتری" />
+            <input name="customer_phone" placeholder="تلفن" />
+            <button class="start" type="submit">ثبت نوبت</button>
+          </form>
+          <div id="appts"></div>
+        </section>
+        <section class="panel">
+          <h2>خودروها و مزایده</h2>
+          <div id="vehicles"></div>
+        </section>
+        <section class="panel">
+          <h2>خریداران</h2>
+          <div id="buyers"></div>
+        </section>
+      </div>
+    </main>
+    <script src="/static/office.js?v=10"></script>
+  </body>
+</html>

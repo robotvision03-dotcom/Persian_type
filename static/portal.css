@@ -1,0 +1,42 @@
+.portal .stack {
+  display: grid;
+  gap: 10px;
+  max-width: 420px;
+}
+
+.portal input {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(244, 239, 226, 0.08);
+  color: var(--text);
+  font-family: inherit;
+}
+
+.cards,
+.card {
+  display: grid;
+  gap: 10px;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+  margin-top: 12px;
+}
+
+.card h3 {
+  margin: 0;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.vehicle-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}

@@ -28,6 +28,9 @@ run.bat
 
 سپس http://127.0.0.1:8000 — دکمه **شروع تماس**.
 
+پورتال خریدار: http://127.0.0.1:8000/buyer  
+دفتر مرکز: http://127.0.0.1:8000/office — ورود `office@center.local` / `Office123!`
+
 ## تست
 
 ```powershell

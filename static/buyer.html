@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>پورتال خریدار</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css?v=10" />
+    <link rel="stylesheet" href="/static/portal.css?v=10" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">خریدار ثبت‌شده</p>
+        <h1>پورتال مزایده خودرو</h1>
+        <p class="lede">فقط خودروهایی که دفتر مرکز منتشر کرده دیده می‌شود. هویت فروشنده و نوبت خصوصی مخفی است.</p>
+      </div>
+      <div class="pills">
+        <a class="path-chip" href="/">تماس مشتری</a>
+        <span id="who" class="path-chip">وارد نشده</span>
+      </div>
+    </header>
+    <main class="shell portal">
+      <section id="auth-box" class="panel">
+        <div class="panel-head"><h2>ورود / ثبت‌نام</h2></div>
+        <form id="login-form" class="stack">
+          <input name="email" type="email" placeholder="ایمیل" required />
+          <input name="password" type="password" placeholder="رمز عبور" required />
+          <input name="business_name" type="text" placeholder="نام کسب‌وکار (برای ثبت‌نام)" />
+          <div class="actions">
+            <button class="start" type="submit">ورود</button>
+            <button class="ghost" id="register-btn" type="button">ثبت‌نام</button>
+          </div>
+          <p id="auth-msg" class="hint"></p>
+        </form>
+      </section>
+      <div id="app-box" class="hidden">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>داشبورد</h2>
+            <button class="ghost" id="logout-btn" type="button">خروج</button>
+          </div>
+          <p id="account-line" class="hint"></p>
+        </section>
+        <section class="panel">
+          <h2>مزایده‌های فعال</h2>
+          <div id="auctions" class="empty">مزایده‌ای نیست.</div>
+        </section>
+        <section class="panel">
+          <h2>نوبت‌های آینده (فقط ساعت)</h2>
+          <div id="appts" class="empty">نوبتی نیست.</div>
+        </section>
+        <section class="panel">
+          <h2>تاریخچه من</h2>
+          <div id="history" class="hint"></div>
+        </section>
+      </div>
+    </main>
+    <script src="/static/buyer.js?v=10"></script>
+  </body>
+</html>

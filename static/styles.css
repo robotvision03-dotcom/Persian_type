@@ -120,6 +120,12 @@ body {
   white-space: nowrap;
 }
 
+a.path-chip {
+  text-decoration: none;
+  color: var(--text);
+  direction: rtl;
+}
+
 .model-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
