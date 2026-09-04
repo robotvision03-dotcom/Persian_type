@@ -223,11 +223,27 @@ async function bindPicker(name) {
   if (minuteBox) minuteBox.innerHTML = optionList(data.minutes || [], clock.minute);
   form.date.value = state.date || "";
   form.time.value = state.time || "";
-  const label = root.querySelector(".pick-label");
-  if (label) {
-    const dayText = state.jalali || (state.date === data.today ? data.today_jalali : "");
-    label.textContent = dayText && state.time ? `نوبت انتخاب‌شده: ${dayText}، ساعت ${faDigits(state.time)}` : "یک روز شمسی و ساعت را انتخاب کنید.";
+  const dayText = state.jalali || (state.date === data.today ? data.today_jalali : "");
+  const toggle = root.querySelector(".pick-toggle");
+  if (toggle) {
+    toggle.textContent = dayText && state.time ? `${dayText}، ساعت ${faDigits(state.time)}` : "انتخاب تاریخ و ساعت";
   }
+}
+
+function closePickers(except) {
+  document.querySelectorAll(".picker").forEach((root) => {
+    if (except && root === except) return;
+    const pop = root.querySelector(".pick-pop");
+    if (pop) pop.classList.add("hidden");
+    root.classList.remove("open");
+  });
+}
+
+function openPicker(root) {
+  closePickers(root);
+  const pop = root.querySelector(".pick-pop");
+  if (pop) pop.classList.remove("hidden");
+  root.classList.add("open");
 }
 
 async function loadBids(auctionId, page) {
@@ -365,7 +381,7 @@ function editingForm() {
   const el = document.activeElement;
   if (!el) return false;
   if (el.tagName === "INPUT" || el.tagName === "SELECT" || el.tagName === "TEXTAREA") return true;
-  return Boolean(el.closest && el.closest(".picker"));
+  return Boolean(el.closest && (el.closest(".picker") || el.closest(".pick-pop")));
 }
 
 function startLive() {
@@ -669,6 +685,19 @@ document.addEventListener("submit", async (event) => {
 });
 
 document.addEventListener("click", async (event) => {
+  const toggle = event.target.closest(".pick-toggle");
+  if (toggle) {
+    const root = toggle.closest(".picker");
+    const pop = root.querySelector(".pick-pop");
+    if (pop && pop.classList.contains("hidden")) openPicker(root);
+    else closePickers();
+    return;
+  }
+  if (event.target.closest(".pick-done")) {
+    closePickers();
+    return;
+  }
+  if (!event.target.closest(".picker")) closePickers();
   const pickDay = event.target.closest(".picker .day[data-date]");
   if (pickDay) {
     const root = pickDay.closest(".picker");
@@ -814,6 +843,7 @@ document.addEventListener("click", async (event) => {
       pickers.appt.date = form.date.value;
       pickers.appt.time = form.time.value;
       await bindPicker("appt");
+      openPicker(document.querySelector('[data-picker="appt"]'));
       form.querySelector("button[type=submit]").textContent = "ذخیره نوبت";
       $("cancel-edit").classList.remove("hidden");
       form.scrollIntoView({ behavior: "smooth", block: "center" });

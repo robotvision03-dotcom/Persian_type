@@ -207,15 +207,46 @@
 }
 
 .picker {
+  position: relative;
+  margin: 8px 0 12px;
+}
+
+.pick-toggle {
+  width: 100%;
+  text-align: right;
   border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 12px;
-  margin: 8px 0 14px;
-  background: rgba(18, 42, 33, 0.35);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(244, 239, 226, 0.08);
+  color: var(--text);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.pick-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: min(280px, calc(100vw - 40px));
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px;
+  background: #14241c;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
 }
 
 .picker .weeks {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
+}
+
+.picker .day {
+  font-size: 0.8rem;
+}
+
+.pick-done {
+  width: 100%;
+  margin-top: 8px;
 }
 
 .picker .day.friday:not(.sel) {

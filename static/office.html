@@ -6,8 +6,8 @@
     <title>دفتر مرکز</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=23" />
-    <link rel="stylesheet" href="/static/portal.css?v=23" />
+    <link rel="stylesheet" href="/static/styles.css?v=25" />
+    <link rel="stylesheet" href="/static/portal.css?v=25" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -58,20 +58,22 @@
             <input type="hidden" name="date" id="appt-date" required />
             <input type="hidden" name="time" id="appt-time" required />
             <h4>ثبت نوبت</h4>
-            <p class="hint">روز را از تقویم شمسی و ساعت را از فهرست انتخاب کنید. جمعه و بعد از ۱۷ برای دفتر مجاز است.</p>
             <div class="picker" data-picker="appt">
-              <div class="cal-nav">
-                <button class="ghost pick-prev" type="button">ماه قبل</button>
-                <strong class="pick-month">تقویم شمسی</strong>
-                <button class="ghost pick-next" type="button">ماه بعد</button>
+              <button class="pick-toggle" type="button">انتخاب تاریخ و ساعت</button>
+              <div class="pick-pop hidden">
+                <div class="cal-nav">
+                  <button class="ghost pick-prev" type="button">ماه قبل</button>
+                  <strong class="pick-month">تقویم شمسی</strong>
+                  <button class="ghost pick-next" type="button">ماه بعد</button>
+                </div>
+                <div class="weekdays"><span>ش</span><span>ی</span><span>د</span><span>س</span><span>چ</span><span>پ</span><span>ج</span></div>
+                <div class="weeks"></div>
+                <div class="time-selects">
+                  <label><span>ساعت</span><select class="pick-hour"></select></label>
+                  <label><span>دقیقه</span><select class="pick-minute"></select></label>
+                </div>
+                <button class="start pick-done" type="button">تأیید</button>
               </div>
-              <div class="weekdays"><span>ش</span><span>ی</span><span>د</span><span>س</span><span>چ</span><span>پ</span><span>ج</span></div>
-              <div class="weeks"></div>
-              <div class="time-selects">
-                <label><span>ساعت</span><select class="pick-hour"></select></label>
-                <label><span>دقیقه</span><select class="pick-minute"></select></label>
-              </div>
-              <p class="pick-label"></p>
             </div>
             <input name="customer_name" placeholder="نام مشتری" />
             <input name="customer_phone" placeholder="تلفن" />
@@ -85,18 +87,21 @@
             <input type="hidden" name="date" />
             <input type="hidden" name="time" />
             <div class="picker" data-picker="express">
-              <div class="cal-nav">
-                <button class="ghost pick-prev" type="button">ماه قبل</button>
-                <strong class="pick-month">تقویم شمسی</strong>
-                <button class="ghost pick-next" type="button">ماه بعد</button>
+              <button class="pick-toggle" type="button">انتخاب تاریخ و ساعت</button>
+              <div class="pick-pop hidden">
+                <div class="cal-nav">
+                  <button class="ghost pick-prev" type="button">ماه قبل</button>
+                  <strong class="pick-month">تقویم شمسی</strong>
+                  <button class="ghost pick-next" type="button">ماه بعد</button>
+                </div>
+                <div class="weekdays"><span>ش</span><span>ی</span><span>د</span><span>س</span><span>چ</span><span>پ</span><span>ج</span></div>
+                <div class="weeks"></div>
+                <div class="time-selects">
+                  <label><span>ساعت</span><select class="pick-hour"></select></label>
+                  <label><span>دقیقه</span><select class="pick-minute"></select></label>
+                </div>
+                <button class="start pick-done" type="button">تأیید</button>
               </div>
-              <div class="weekdays"><span>ش</span><span>ی</span><span>د</span><span>س</span><span>چ</span><span>پ</span><span>ج</span></div>
-              <div class="weeks"></div>
-              <div class="time-selects">
-                <label><span>ساعت</span><select class="pick-hour"></select></label>
-                <label><span>دقیقه</span><select class="pick-minute"></select></label>
-              </div>
-              <p class="pick-label"></p>
             </div>
             <input name="customer_name" placeholder="نام مشتری" />
             <input name="customer_phone" placeholder="تلفن" />
@@ -146,6 +151,6 @@
         </section>
       </div>
     </main>
-    <script src="/static/office.js?v=23"></script>
+    <script src="/static/office.js?v=25"></script>
   </body>
 </html>
