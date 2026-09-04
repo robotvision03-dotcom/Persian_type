@@ -94,43 +94,33 @@ function todayIso() {
   return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
 
-function renderNotes(rows) {
-  const box = $("notes");
-  if (!box) return;
-  const items = rows || [];
-  const wins = items.filter((row) => row.unread && (row.event === "YOU_WON" || row.event === "OFFICE_ACCEPTED"));
-  const banner = $("winner-banner");
-  if (banner) {
-    if (wins.length) {
-      banner.classList.remove("hidden");
-      banner.innerHTML = wins
-        .map((row) => `<strong>${escapeHtml(row.title)}</strong><br />${escapeHtml(row.body || "")}`)
-        .join("<hr />");
-    } else {
-      banner.classList.add("hidden");
-      banner.innerHTML = "";
-    }
-  }
-  if (!items.length) {
-    box.className = "empty";
-    box.textContent = "اعلانی نیست.";
-    return;
-  }
-  box.className = "note-list";
-  box.innerHTML = items
-    .map(
-      (row) => `<article class="note-card ${row.unread ? "unread" : ""} ${row.event === "YOU_WON" ? "notice-win" : ""}">
-        <h4>${escapeHtml(row.title)}</h4>
-        <p>${escapeHtml(row.body || "")}</p>
-        <p class="hint">${escapeHtml(row.created_at || "")}</p>
-        ${row.unread ? `<button class="ghost note-read" type="button" data-note="${row.id}">خواندم</button>` : ""}
-      </article>`
-    )
-    .join("");
+const TOAST_EVENTS = new Set(["YOU_WON", "OFFICE_ACCEPTED", "OUTBID"]);
+const seenToasts = new Set();
+
+function showToast(text, kind) {
+  const stack = $("toasts");
+  if (!stack || !text) return;
+  const el = document.createElement("p");
+  el.className = "toast" + (kind ? " " + kind : "");
+  el.textContent = text;
+  stack.appendChild(el);
+  window.setTimeout(() => el.classList.add("out"), 4500);
+  window.setTimeout(() => el.remove(), 5400);
 }
 
-async function loadNotes() {
-  renderNotes(await api("/buyers/me/notifications"));
+async function flashNotes() {
+  const rows = await api("/buyers/me/notifications");
+  const unread = rows.filter((row) => row.unread);
+  const important = unread.filter((row) => TOAST_EVENTS.has(row.event) && !seenToasts.has(row.id));
+  important.forEach((row) => {
+    seenToasts.add(row.id);
+    const text = [row.title, row.body].filter(Boolean).join(" — ");
+    showToast(text, row.event === "OUTBID" ? "" : "win");
+  });
+  const ids = unread.map((row) => row.id);
+  if (ids.length) {
+    await api("/notifications/read", { method: "POST", body: JSON.stringify({ ids }) });
+  }
 }
 
 async function loadHistory(day, page) {
@@ -216,10 +206,13 @@ function startLive() {
     try {
       const live = await api("/live");
       const unread = Number(live.unread || 0);
-      if (live.revision !== liveRevision || unread !== lastUnread) {
+      if (live.revision !== liveRevision) {
         liveRevision = live.revision;
         lastUnread = unread;
         await refresh({ live: true });
+      } else if (unread !== lastUnread) {
+        lastUnread = unread;
+        await flashNotes();
       }
     } catch (_error) {}
   }, 1000);
@@ -286,16 +279,8 @@ async function refresh(options) {
     $("appts").innerHTML = appts.length
       ? `<ul>${appts.map((row) => `<li>${row.date} ${row.time} — نوبت</li>`).join("")}</ul>`
       : "نوبتی نیست.";
-    const hist = await api("/buyers/me/auctions");
-    await loadNotes();
-    const winning = hist.winning || [];
-    if (winning.length && $("winner-banner") && $("winner-banner").classList.contains("hidden")) {
-      $("winner-banner").classList.remove("hidden");
-      $("winner-banner").innerHTML = winning
-        .map((row) => `<strong>شما برنده مزایده شدید</strong><br />مبلغ نهایی ${money(row.final_price)} تومان · وضعیت ${escapeHtml(row.status)}`)
-        .join("<hr />");
-    }
-    if (winning.length || !(options && options.live)) {
+    await flashNotes();
+    if (!(options && options.live)) {
       if (!historyDay) historyDay = todayIso();
       await loadHistory(historyDay, historyPage);
     }
@@ -411,17 +396,6 @@ document.addEventListener("click", async (event) => {
   const bidPage = event.target.closest(".bid-page");
   if (bidPage) {
     await loadBids(bidPage.getAttribute("data-id"), bidPage.getAttribute("data-page"));
-    return;
-  }
-  const noteRead = event.target.closest(".note-read");
-  if (noteRead) {
-    await api("/notifications/read", { method: "POST", body: JSON.stringify({ ids: [Number(noteRead.getAttribute("data-note"))] }) });
-    await loadNotes();
-    return;
-  }
-  if (event.target.closest("#notes-read")) {
-    await api("/notifications/read", { method: "POST", body: JSON.stringify({ ids: [] }) });
-    await loadNotes();
     return;
   }
   const useMin = event.target.closest(".use-min-btn");
