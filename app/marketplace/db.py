@@ -149,6 +149,7 @@ CREATE TABLE IF NOT EXISTS auctions (
     extensions_used INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    ledger_day TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (vehicle_id) REFERENCES vehicles(id)
 );
 CREATE TABLE IF NOT EXISTS auction_participants (
@@ -215,6 +216,14 @@ CREATE TABLE IF NOT EXISTS marketplace_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_bids_auction_created ON bids(auction_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_bids_buyer_created ON bids(buyer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_auctions_day ON auctions(end_time, status);
+CREATE INDEX IF NOT EXISTS idx_auctions_vehicle ON auctions(vehicle_id, status);
+CREATE INDEX IF NOT EXISTS idx_winners_buyer ON auction_winners(buyer_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_appointments_day ON marketplace_appointments(date, time);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, read_at, id);
 """
 
 
@@ -242,6 +251,21 @@ APPOINTMENT_EXTRA_COLUMNS = {
     "notes": "TEXT NOT NULL DEFAULT ''",
 }
 
+AUCTION_EXTRA_COLUMNS = {
+    "ledger_day": "TEXT NOT NULL DEFAULT ''",
+}
+
+PIPELINE_VEHICLE_STATUSES = (
+    "APPOINTMENT_SCHEDULED",
+    "CUSTOMER_ARRIVED",
+    "INSPECTION_IN_PROGRESS",
+    "INSPECTION_COMPLETED",
+    "PENDING_OFFICE_APPROVAL",
+    "READY_FOR_BIDDING",
+    "BIDDING_ACTIVE",
+    "BIDDING_ENDED",
+)
+
 
 def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
     existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
@@ -250,11 +274,34 @@ def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
 
 
+INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_bids_auction_created ON bids(auction_id, created_at, id)",
+    "CREATE INDEX IF NOT EXISTS idx_bids_buyer_created ON bids(buyer_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_auctions_day ON auctions(end_time, status)",
+    "CREATE INDEX IF NOT EXISTS idx_auctions_ledger_day ON auctions(ledger_day, status, id)",
+    "CREATE INDEX IF NOT EXISTS idx_auctions_vehicle ON auctions(vehicle_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_winners_buyer ON auction_winners(buyer_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_appointments_day ON marketplace_appointments(date, time)",
+    "CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, read_at, id)",
+)
+
+
 def migrate_marketplace(conn: sqlite3.Connection) -> None:
     _ensure_columns(conn, "vehicles", VEHICLE_EXTRA_COLUMNS)
     _ensure_columns(conn, "inspections", INSPECTION_EXTRA_COLUMNS)
     _ensure_columns(conn, "buyer_profiles", BUYER_EXTRA_COLUMNS)
     _ensure_columns(conn, "marketplace_appointments", APPOINTMENT_EXTRA_COLUMNS)
+    _ensure_columns(conn, "auctions", AUCTION_EXTRA_COLUMNS)
+    conn.execute(
+        """
+        UPDATE auctions
+        SET ledger_day = substr(COALESCE(end_time, published_at, created_at), 1, 10)
+        WHERE ledger_day IS NULL OR ledger_day = ''
+        """
+    )
+    for sql in INDEXES:
+        conn.execute(sql)
 
 
 def init_marketplace(db_path: Path | None = None) -> Path:
@@ -273,6 +320,8 @@ def get_conn(db_path: Path | None = None, immediate: bool = False) -> Iterator[s
     conn = sqlite3.connect(str(path), timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA journal_mode = WAL")
     try:
         if immediate:
             conn.execute("BEGIN IMMEDIATE")

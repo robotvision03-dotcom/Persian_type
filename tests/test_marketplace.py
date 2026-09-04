@@ -497,6 +497,80 @@ class InspectionCatalogTests(unittest.TestCase):
             self.assertNotIn("SECRETVIN", str(detail))
 
 
+class DailyLedgerTests(unittest.TestCase):
+    def test_ended_auction_has_paginated_bid_list_and_day_nav(self):
+        tmp, path = _db()
+        with tmp:
+            when = datetime(2026, 9, 5, 9, 0, 0)
+            _appt, vehicle, auction = _pipeline(path, start=1000, increment=100, now=when)
+            session_a, a = _buyer(path, "a@ex.com")
+            session_b, b = _buyer(path, "b@ex.com")
+            svc.update_buyer_profile(a["id"], {"contact_person": "علی برنده", "phone": "09121111111"}, db_path=path)
+            svc.update_buyer_profile(b["id"], {"contact_person": "مریم خریدار", "phone": "09122222222"}, db_path=path)
+            svc.place_manual_bid(auction["id"], a, 1000, db_path=path, now=when)
+            svc.place_manual_bid(auction["id"], b, 1200, db_path=path, now=when + timedelta(seconds=2))
+            closed = svc.close_if_expired(auction["id"], db_path=path, now=when + timedelta(hours=2))
+            self.assertEqual(closed["status"], "ENDED")
+            report = svc.day_report(when.date(), office=True, db_path=path)
+            self.assertEqual(report["day"], "2026-09-05")
+            self.assertEqual(report["prev_day"], "2026-09-04")
+            self.assertEqual(report["next_day"], "2026-09-06")
+            self.assertEqual(report["total_auctions"], 1)
+            self.assertGreaterEqual(report["total_bids"], 2)
+            self.assertEqual(report["auctions"][0]["vehicle"]["brand"], "پژو")
+            self.assertEqual(report["auctions"][0]["winner"]["buyer_name"], "مریم خریدار")
+            empty = svc.day_report(when.date() - timedelta(days=1), office=True, db_path=path)
+            self.assertEqual(empty["total_auctions"], 0)
+            office_page = svc.list_bids_page(auction["id"], office=True, page=1, page_size=1, db_path=path)
+            self.assertEqual(office_page["page_size"], 1)
+            self.assertGreaterEqual(office_page["pages"], 2)
+            self.assertEqual(office_page["items"][0]["buyer_name"], "علی برنده")
+            clamped = svc.list_bids_page(auction["id"], office=True, page_size=400, db_path=path)
+            self.assertEqual(clamped["page_size"], 50)
+            buyer_report = svc.day_report(when.date(), office=False, buyer_id=a["id"], db_path=path)
+            self.assertEqual(buyer_report["total_auctions"], 1)
+            self.assertIsNone(buyer_report["auctions"][0]["winner"]["buyer_name"])
+            self.assertIsNone(buyer_report["auctions"][0]["winner"]["buyer_id"])
+            self.assertFalse(buyer_report["auctions"][0]["winner"]["is_mine"])
+            buyer_bids = svc.list_bids_page(auction["id"], viewer_buyer_id=a["id"], page_size=20, db_path=path)
+            for item in buyer_bids["items"]:
+                self.assertNotIn("buyer_id", item)
+                self.assertNotIn("buyer_name", item)
+                self.assertNotIn("buyer_phone", item)
+            stranger_session, stranger = _buyer(path, "c@ex.com")
+            other_day = svc.day_report(when.date(), office=False, buyer_id=stranger["id"], db_path=path)
+            self.assertEqual(other_day["total_auctions"], 0)
+            self.assertFalse(svc.buyer_may_list_bids(stranger, closed, path))
+            self.assertTrue(svc.buyer_may_list_bids(a, closed, path))
+            self.assertNotIn("SECRETVIN", str(buyer_report))
+            self.assertNotIn("علی رضایی", str(buyer_report))
+
+    def test_winner_notifies_buyer_and_office(self):
+        tmp, path = _db()
+        with tmp:
+            when = datetime(2026, 9, 5, 9, 0, 0)
+            _appt, _vehicle, auction = _pipeline(path, start=1000, increment=100, now=when)
+            _, winner = _buyer(path, "win@ex.com")
+            svc.update_buyer_profile(winner["id"], {"contact_person": "برنده تست"}, db_path=path)
+            svc.place_manual_bid(auction["id"], winner, 1000, db_path=path, now=when)
+            svc.close_if_expired(auction["id"], db_path=path, now=when + timedelta(hours=1))
+            notes = svc.list_notifications(winner["user_id"], path)
+            self.assertTrue(any(row["event"] == "YOU_WON" and "برنده" in row["title"] for row in notes))
+            self.assertTrue(all("buyer_name" not in (row.get("payload") or {}) for row in notes))
+            office = svc.user_by_email("office@center.local", path)
+            office_notes = svc.list_notifications(office["id"], path, office=True)
+            self.assertTrue(any(row["event"] == "WINNER_READY" and "برنده تست" in row["body"] for row in office_notes))
+            marked = svc.mark_notifications_read(winner["user_id"], db_path=path)
+            self.assertEqual(marked["unread"], 0)
+
+    def test_office_calendar_is_jalali(self):
+        cal = svc.office_month_calendar(1405, 6)
+        self.assertEqual(cal["month_name"], "شهریور")
+        self.assertTrue(cal["times"])
+        self.assertIn("09:00", cal["times"])
+        self.assertTrue(any(cell and cell.get("friday") for week in cal["weeks"] for cell in week))
+
+
 @unittest.skipUnless(TestClient, "httpx is required")
 class MarketplaceApiTests(unittest.TestCase):
     def test_http_auth_and_privacy(self):

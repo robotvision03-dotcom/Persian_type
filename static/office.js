@@ -8,6 +8,19 @@ let liveRevision = 0;
 let liveTimer = null;
 let refreshing = false;
 let lastBuyers = [];
+let historyDay = "";
+let historyPage = 1;
+let historyPrev = "";
+let historyNext = "";
+let apptDay = "";
+let apptPrev = "";
+let apptNext = "";
+const pickers = {};
+
+function todayIso() {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
 
 async function api(path, options) {
   const response = await fetch(path, { ...(options || {}), headers: { ...headers(), ...((options && options.headers) || {}) } });
@@ -47,6 +60,116 @@ function optionHtml(options, selected) {
 
 function selectField(name, options, selected, extra = "") {
   return `<select name="${escapeHtml(name)}" ${extra}>${optionHtml(options, selected || "")}</select>`;
+}
+
+function renderNotes(rows) {
+  const box = $("notes");
+  if (!box) return;
+  const items = rows || [];
+  if (!items.length) {
+    box.className = "empty";
+    box.textContent = "اعلانی نیست.";
+    return;
+  }
+  box.className = "note-list";
+  box.innerHTML = items
+    .map((row) => {
+      const win = row.event === "WINNER_READY" || row.event === "YOU_WON";
+      return `<article class="note-card ${row.unread ? "unread" : ""} ${win ? "notice-win" : ""}">
+        <h4>${escapeHtml(row.title)}</h4>
+        <p>${escapeHtml(row.body || "")}</p>
+        <p class="hint">${escapeHtml(row.created_at || "")}</p>
+        ${row.unread ? `<button class="ghost note-read" type="button" data-note="${row.id}">خواندم</button>` : ""}
+      </article>`;
+    })
+    .join("");
+}
+
+async function loadNotes() {
+  renderNotes(await api("/office/notifications"));
+}
+
+async function loadHistory(day, page) {
+  if (day) historyDay = day;
+  if (page) historyPage = page;
+  const query = new URLSearchParams({ day: historyDay || todayIso(), page: String(historyPage || 1) });
+  const data = await api("/office/history?" + query.toString());
+  historyDay = data.day;
+  historyPage = data.page;
+  historyPrev = data.prev_day;
+  historyNext = data.next_day;
+  $("hist-label").textContent = data.jalali;
+  $("hist-summary").textContent = `${data.total_appointments || 0} نوبت · ${data.total_auctions} مزایده · ${data.total_bids} پیشنهاد`;
+  if (!data.auctions.length) {
+    $("history").innerHTML = `<p class="empty">برای این روز مزایده‌ای نیست.</p>`;
+  } else {
+    $("history").innerHTML = data.auctions
+      .map((row) => {
+        const winner = row.winner
+          ? `<p class="winner-row">برنده ${escapeHtml(row.winner.buyer_name || "#" + row.winner.buyer_id)} · ${money(row.winner.final_price)} · ${escapeHtml(row.winner.status)}</p>`
+          : "<p>برنده‌ای ثبت نشده</p>";
+        return `<article class="card">
+          <h3>${escapeHtml(row.vehicle.brand || "خودرو")} ${escapeHtml(row.vehicle.model || "")} · مزایده #${row.id}</h3>
+          <p>وضعیت ${escapeHtml(row.status)} · ${row.bid_count} پیشنهاد · پایان ${escapeHtml(row.end_time || "")}</p>
+          ${winner}
+          <button class="ghost view-bids" type="button" data-id="${row.id}">فهرست پیشنهادها</button>
+          <div class="bid-box" data-bids="${row.id}"></div>
+        </article>`;
+      })
+      .join("");
+  }
+  $("hist-pages").innerHTML = data.pages > 1
+    ? `<button class="ghost hist-page" type="button" data-page="${Math.max(1, data.page - 1)}" ${data.page <= 1 ? "disabled" : ""}>صفحه قبل</button>
+       <span>صفحه ${data.page} از ${data.pages}</span>
+       <button class="ghost hist-page" type="button" data-page="${Math.min(data.pages, data.page + 1)}" ${data.page >= data.pages ? "disabled" : ""}>صفحه بعد</button>`
+    : "";
+}
+
+async function bindPicker(name) {
+  const root = document.querySelector(`[data-picker="${name}"]`);
+  if (!root) return;
+  const form = root.closest("form");
+  const state = pickers[name] || { year: null, month: null, date: form.date.value || todayIso(), time: form.time.value || "" };
+  pickers[name] = state;
+  const query = state.year ? `?year=${state.year}&month=${state.month}` : "";
+  const data = await api("/office/calendar" + query);
+  state.year = data.year;
+  state.month = data.month;
+  root.querySelector(".pick-month").textContent = `${data.month_name} ${data.year}`;
+  const weeks = root.querySelector(".weeks");
+  weeks.innerHTML = data.weeks
+    .flat()
+    .map((cell) => {
+      if (!cell) return `<button type="button" class="day" disabled></button>`;
+      const cls = ["day", cell.today ? "today" : "", cell.date === state.date ? "sel" : "", cell.friday ? "closed" : ""]
+        .filter(Boolean)
+        .join(" ");
+      return `<button type="button" class="${cls}" data-date="${cell.date}">${cell.jalali_day}</button>`;
+    })
+    .join("");
+  const times = root.querySelector(".times");
+  times.innerHTML = (data.times || [])
+    .map((time) => `<button type="button" class="time-chip ${time === state.time ? "pick" : ""}" data-time="${time}">${time}</button>`)
+    .join("");
+  form.date.value = state.date || "";
+  form.time.value = state.time || "";
+  const label = root.querySelector(".pick-label");
+  if (label) label.textContent = state.date && state.time ? `انتخاب شما: ${data.today_jalali && state.date === data.today ? "امروز" : state.date} ساعت ${state.time}` : "یک روز و یک ساعت را انتخاب کنید.";
+}
+
+async function loadBids(auctionId, page) {
+  const box = document.querySelector(`[data-bids="${auctionId}"]`);
+  if (!box) return;
+  const data = await api(`/auctions/${auctionId}/bids?page=${page || 1}&page_size=20`);
+  const rows = (data.items || [])
+    .map((row) => `<tr><td>${escapeHtml(row.buyer_name || "خریدار")} (#${row.buyer_id || "—"})</td><td>${money(row.amount)}</td><td>${escapeHtml(row.bid_type)}</td><td>${escapeHtml(row.created_at)}</td></tr>`)
+    .join("");
+  box.innerHTML = `<table class="history-table"><thead><tr><th>خریدار</th><th>مبلغ</th><th>نوع</th><th>زمان</th></tr></thead><tbody>${rows || `<tr><td colspan="4">پیشنهادی نیست</td></tr>`}</tbody></table>
+    <div class="day-nav">
+      <button class="ghost bid-page" type="button" data-id="${auctionId}" data-page="${Math.max(1, (data.page || 1) - 1)}">قبلی</button>
+      <span>صفحه ${data.page} از ${data.pages}</span>
+      <button class="ghost bid-page" type="button" data-id="${auctionId}" data-page="${Math.min(data.pages, (data.page || 1) + 1)}">بعدی</button>
+    </div>`;
 }
 
 function activeAuction(car, auctions) {
@@ -167,7 +290,9 @@ async function loadCatalog() {
 
 function editingForm() {
   const el = document.activeElement;
-  return el && (el.tagName === "INPUT" || el.tagName === "SELECT" || el.tagName === "TEXTAREA");
+  if (!el) return false;
+  if (el.tagName === "INPUT" || el.tagName === "SELECT" || el.tagName === "TEXTAREA") return true;
+  return Boolean(el.closest && el.closest(".picker"));
 }
 
 function startLive() {
@@ -195,7 +320,13 @@ async function refresh(options) {
   refreshing = true;
   try {
   await loadCatalog();
-  const dash = await api("/office/dashboard");
+  if (!apptDay) apptDay = todayIso();
+  if (!historyDay) historyDay = todayIso();
+  const dash = await api("/office/dashboard?day=" + encodeURIComponent(apptDay));
+  apptDay = dash.day || apptDay;
+  apptPrev = dash.prev_day || "";
+  apptNext = dash.next_day || "";
+  if ($("appt-label")) $("appt-label").textContent = dash.jalali || apptDay;
   if (live && editingForm()) {
     (dash.vehicles || []).forEach((car) => {
       const card = document.querySelector(`[data-vehicle-id="${car.id}"]`);
@@ -254,8 +385,10 @@ async function refresh(options) {
           <button class="ghost approve" type="button" data-id="${car.id}">تأیید دفتر</button>
           <button class="start publish" type="button" data-id="${car.id}">انتشار مزایده</button>
           ${auction && auction.status === "ACTIVE" ? `<button class="ghost cancel-auc" type="button" data-id="${auction.id}">لغو مزایده</button>` : ""}
+          ${auction ? `<button class="ghost view-bids" type="button" data-id="${auction.id}">فهرست پیشنهادها</button>` : ""}
           ${winner ? `<button class="start accept" type="button" data-id="${auction.id}">پذیرش برنده</button><button class="ghost reject" type="button" data-id="${auction.id}">رد برنده</button>` : ""}
         </div>
+        ${auction ? `<div class="bid-box" data-bids="${auction.id}"></div>` : ""}
         ${renderSpecs(car)}
         ${renderInspection(car)}
       </article>`;
@@ -271,8 +404,12 @@ async function refresh(options) {
     )
     .join("")}</tbody></table>`;
   startLive();
-  if (!$("appt-form").appointment_id.value) fillNow($("appt-form"));
-  fillNow($("express-form"));
+  await loadNotes();
+  if (!live) {
+    if (!$("appt-form").appointment_id.value) await fillNow($("appt-form"), "appt");
+    await fillNow($("express-form"), "express");
+    await loadHistory(historyDay, historyPage);
+  }
   } finally {
     refreshing = false;
   }
@@ -298,21 +435,31 @@ $("logout-btn").addEventListener("click", () => {
   refresh();
 });
 
-function fillNow(form) {
+async function fillNow(form, pickerName) {
   if (!form) return;
   const now = new Date();
   const iso = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString();
   if (!form.date.value) form.date.value = iso.slice(0, 10);
-  if (!form.time.value) form.time.value = iso.slice(11, 16);
+  if (!form.time.value) {
+    const hh = iso.slice(11, 13);
+    const mm = Number(iso.slice(14, 16)) < 30 ? "00" : "30";
+    form.time.value = `${hh}:${mm}`;
+  }
+  if (pickerName) {
+    pickers[pickerName] = pickers[pickerName] || {};
+    pickers[pickerName].date = form.date.value;
+    pickers[pickerName].time = form.time.value;
+    await bindPicker(pickerName);
+  }
 }
 
-function resetApptForm() {
+async function resetApptForm() {
   const form = $("appt-form");
   form.reset();
   form.appointment_id.value = "";
   $("cancel-edit").classList.add("hidden");
   form.querySelector("button[type=submit]").textContent = "ثبت نوبت";
-  fillNow(form);
+  await fillNow(form, "appt");
 }
 
 $("cancel-edit").addEventListener("click", () => resetApptForm());
@@ -410,6 +557,109 @@ document.addEventListener("submit", async (event) => {
 });
 
 document.addEventListener("click", async (event) => {
+  const pickDay = event.target.closest(".picker .day[data-date]");
+  if (pickDay) {
+    const root = pickDay.closest(".picker");
+    const name = root.getAttribute("data-picker");
+    pickers[name] = pickers[name] || {};
+    pickers[name].date = pickDay.getAttribute("data-date");
+    root.closest("form").date.value = pickers[name].date;
+    await bindPicker(name);
+    return;
+  }
+  const pickTime = event.target.closest(".picker .time-chip[data-time]");
+  if (pickTime) {
+    const root = pickTime.closest(".picker");
+    const name = root.getAttribute("data-picker");
+    pickers[name] = pickers[name] || {};
+    pickers[name].time = pickTime.getAttribute("data-time");
+    root.closest("form").time.value = pickers[name].time;
+    await bindPicker(name);
+    return;
+  }
+  const pickPrev = event.target.closest(".pick-prev");
+  if (pickPrev) {
+    const name = pickPrev.closest(".picker").getAttribute("data-picker");
+    pickers[name] = pickers[name] || {};
+    pickers[name].month = (pickers[name].month || 1) - 1;
+    if (pickers[name].month < 1) {
+      pickers[name].month = 12;
+      pickers[name].year = (pickers[name].year || 1405) - 1;
+    }
+    await bindPicker(name);
+    return;
+  }
+  const pickNext = event.target.closest(".pick-next");
+  if (pickNext) {
+    const name = pickNext.closest(".picker").getAttribute("data-picker");
+    pickers[name] = pickers[name] || {};
+    pickers[name].month = (pickers[name].month || 1) + 1;
+    if (pickers[name].month > 12) {
+      pickers[name].month = 1;
+      pickers[name].year = (pickers[name].year || 1405) + 1;
+    }
+    await bindPicker(name);
+    return;
+  }
+  if (event.target.closest("#hist-prev")) {
+    historyDay = historyPrev || historyDay;
+    historyPage = 1;
+    await loadHistory();
+    return;
+  }
+  if (event.target.closest("#hist-next")) {
+    historyDay = historyNext || historyDay;
+    historyPage = 1;
+    await loadHistory();
+    return;
+  }
+  if (event.target.closest("#hist-today")) {
+    historyDay = todayIso();
+    historyPage = 1;
+    await loadHistory();
+    return;
+  }
+  const histPage = event.target.closest(".hist-page");
+  if (histPage) {
+    await loadHistory(historyDay, Number(histPage.getAttribute("data-page") || 1));
+    return;
+  }
+  if (event.target.closest("#appt-prev") && apptPrev) {
+    apptDay = apptPrev;
+    await refresh();
+    return;
+  }
+  if (event.target.closest("#appt-next") && apptNext) {
+    apptDay = apptNext;
+    await refresh();
+    return;
+  }
+  if (event.target.closest("#appt-today")) {
+    apptDay = todayIso();
+    await refresh();
+    return;
+  }
+  const viewBids = event.target.closest(".view-bids");
+  if (viewBids) {
+    await loadBids(viewBids.getAttribute("data-id"), 1);
+    return;
+  }
+  const bidPage = event.target.closest(".bid-page");
+  if (bidPage) {
+    await loadBids(bidPage.getAttribute("data-id"), bidPage.getAttribute("data-page"));
+    return;
+  }
+  const noteRead = event.target.closest(".note-read");
+  if (noteRead) {
+    await api("/notifications/read", { method: "POST", body: JSON.stringify({ ids: [Number(noteRead.getAttribute("data-note"))] }) });
+    await loadNotes();
+    return;
+  }
+  if (event.target.closest("#notes-read")) {
+    await api("/notifications/read", { method: "POST", body: JSON.stringify({ ids: [] }) });
+    await loadNotes();
+    return;
+  }
   const jump = event.target.closest(".body-chip");
   if (jump) {
     const target = document.getElementById(`item-${jump.getAttribute("data-jump")}`);
@@ -457,6 +707,10 @@ document.addEventListener("click", async (event) => {
       form.time.value = (btn.getAttribute("data-time") || "").slice(0, 5);
       form.customer_name.value = btn.getAttribute("data-name") || "";
       form.customer_phone.value = btn.getAttribute("data-phone") || "";
+      pickers.appt = pickers.appt || {};
+      pickers.appt.date = form.date.value;
+      pickers.appt.time = form.time.value;
+      await bindPicker("appt");
       form.querySelector("button[type=submit]").textContent = "ذخیره نوبت";
       $("cancel-edit").classList.remove("hidden");
       form.scrollIntoView({ behavior: "smooth", block: "center" });

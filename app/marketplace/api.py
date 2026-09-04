@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from . import service as svc
@@ -239,7 +239,34 @@ def my_auctions(request: Request, authorization: str | None = Header(default=Non
 @router.get("/buyers/me/notifications")
 def my_notes(request: Request, authorization: str | None = Header(default=None)) -> list[dict[str, Any]]:
     user = current_user(request, authorization)
-    return svc.list_notifications(user["id"], db(request))
+    return svc.list_notifications(user["id"], db(request), office=False)
+
+
+class ReadNotesBody(BaseModel):
+    ids: list[int] = Field(default_factory=list)
+
+
+@router.post("/notifications/read")
+def read_notes(body: ReadNotesBody, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    user = current_user(request, authorization)
+    return svc.mark_notifications_read(user["id"], body.ids or None, db(request))
+
+
+@router.get("/office/notifications")
+def office_notes(request: Request, authorization: str | None = Header(default=None)) -> list[dict[str, Any]]:
+    user = staff_user(request, authorization)
+    return svc.list_notifications(user["id"], db(request), office=True)
+
+
+@router.get("/office/calendar")
+def office_calendar(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    year: int | None = None,
+    month: int | None = None,
+) -> dict[str, Any]:
+    staff_user(request, authorization)
+    return svc.office_month_calendar(year, month)
 
 
 @router.get("/buyer/appointments")
@@ -249,9 +276,9 @@ def buyer_appts(request: Request, authorization: str | None = Header(default=Non
 
 
 @router.get("/live")
-def live(request: Request, authorization: str | None = Header(default=None)) -> dict[str, int]:
-    current_user(request, authorization)
-    return svc.live_state(db(request))
+def live(request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    user = current_user(request, authorization)
+    return svc.live_state(db(request), user_id=user["id"])
 
 
 @router.get("/auctions")
@@ -313,22 +340,57 @@ def delete_auto(auction_id: int, request: Request, authorization: str | None = H
 
 
 @router.get("/auctions/{auction_id}/bids")
-def auction_bids(auction_id: int, request: Request, authorization: str | None = Header(default=None)) -> list[dict[str, Any]]:
+def auction_bids(
+    auction_id: int,
+    request: Request,
+    authorization: str | None = Header(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=50),
+) -> dict[str, Any]:
     user = current_user(request, authorization)
     path = db(request)
     if user["role"] in {"OFFICE", "ADMIN"}:
-        return svc.list_bids(auction_id, office=True, db_path=path)
+        return svc.list_bids_page(auction_id, office=True, page=page, page_size=page_size, db_path=path)
     buyer = svc.require_buyer(user, path)
     auction = svc.get_auction(auction_id, path)
-    if not svc.buyer_may_see_auction(buyer, auction, path):
+    if not svc.buyer_may_list_bids(buyer, auction, path):
         raise HTTPException(status_code=404, detail="مزایده پیدا نشد.")
-    return svc.list_bids(auction_id, viewer_buyer_id=buyer["id"], db_path=path)
+    return svc.list_bids_page(auction_id, viewer_buyer_id=buyer["id"], page=page, page_size=page_size, db_path=path)
+
+
+@router.get("/office/history")
+def office_history(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    day: str | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=50),
+) -> dict[str, Any]:
+    staff_user(request, authorization)
+    return svc.day_report(svc.parse_day(day), office=True, page=page, page_size=page_size, db_path=db(request))
+
+
+@router.get("/buyer/history")
+def buyer_history(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    day: str | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=50),
+) -> dict[str, Any]:
+    user = current_user(request, authorization)
+    buyer = svc.require_buyer(user, db(request))
+    return svc.day_report(svc.parse_day(day), office=False, buyer_id=buyer["id"], page=page, page_size=page_size, db_path=db(request))
 
 
 @router.get("/office/dashboard")
-def office_dash(request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+def office_dash(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    day: str | None = None,
+) -> dict[str, Any]:
     staff_user(request, authorization)
-    return svc.office_dashboard(db(request))
+    return svc.office_dashboard(db(request), day=day)
 
 
 @router.post("/office/appointments")

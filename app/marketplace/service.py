@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from ..booking import is_office_open, list_appointments, slot_times
+from ..jalali import format_jalali
 from .catalog import empty_report, inspection_catalog, normalize_report, public_report
-from .db import get_conn, init_marketplace
 from .engine import (
     DEFAULT_MIN_INCREMENT,
     extend_end,
@@ -22,7 +22,9 @@ from .engine import (
     should_extend,
 )
 from .matching import match_score
+from .history import day_report, ledger_day_of, list_bids_page, office_month_calendar, parse_day
 from .privacy import buyer_can_see_vehicle, public_bid, public_vehicle, safe_appointment
+from .db import PIPELINE_VEHICLE_STATUSES, get_conn, init_marketplace
 
 PBKDF_ROUNDS = 180_000
 SESSION_DAYS = 7
@@ -85,9 +87,13 @@ def bump_live(conn: Any) -> int:
     return nxt
 
 
-def live_state(db_path: Path | None = None) -> dict[str, int]:
+def live_state(db_path: Path | None = None, user_id: int | None = None, now: datetime | str | None = None) -> dict[str, Any]:
+    close_expired_auctions(db_path, now=now)
     with get_conn(db_path) as conn:
-        return {"revision": _live_value(conn)}
+        payload: dict[str, Any] = {"revision": _live_value(conn)}
+        if user_id:
+            payload["unread"] = unread_notification_count(user_id, conn=conn)
+    return payload
 
 
 def ensure_staff_users(db_path: Path | None = None) -> None:
@@ -435,13 +441,63 @@ def notify(
         owned.execute(sql, params)
 
 
-def list_notifications(user_id: int, db_path: Path | None = None) -> list[dict[str, Any]]:
+def _notification_payload(row: Any, office: bool = False) -> dict[str, Any]:
+    data = dict(row)
+    raw = _json_obj(data.get("payload"))
+    if not office:
+        for key in ("buyer_id", "buyer_name", "buyer_phone", "national_id", "customer_name", "vin", "plate"):
+            raw.pop(key, None)
+    data["payload"] = raw
+    data["unread"] = not data.get("read_at")
+    return data
+
+
+def list_notifications(user_id: int, db_path: Path | None = None, office: bool = False) -> list[dict[str, Any]]:
     with get_conn(db_path) as conn:
         rows = conn.execute(
             "SELECT * FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 80",
             (user_id,),
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [_notification_payload(row, office=office) for row in rows]
+
+
+def unread_notification_count(user_id: int, db_path: Path | None = None, conn=None) -> int:
+    sql = "SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND read_at IS NULL"
+    if conn is not None:
+        return int(conn.execute(sql, (user_id,)).fetchone()["n"])
+    with get_conn(db_path) as owned:
+        return int(owned.execute(sql, (user_id,)).fetchone()["n"])
+
+
+def mark_notifications_read(
+    user_id: int,
+    ids: list[int] | None = None,
+    db_path: Path | None = None,
+    now: datetime | str | None = None,
+) -> dict[str, Any]:
+    stamp = now_iso(now)
+    with get_conn(db_path) as conn:
+        if ids:
+            placeholders = ",".join("?" * len(ids))
+            conn.execute(
+                f"UPDATE notifications SET read_at = ? WHERE user_id = ? AND id IN ({placeholders}) AND read_at IS NULL",
+                (stamp, user_id, *ids),
+            )
+        else:
+            conn.execute(
+                "UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL",
+                (stamp, user_id),
+            )
+    return {"ok": True, "unread": unread_notification_count(user_id, db_path)}
+
+
+def staff_user_ids(conn) -> list[int]:
+    return [int(row["id"]) for row in conn.execute("SELECT id FROM users WHERE role IN ('OFFICE', 'ADMIN') AND status = 'ACTIVE'")]
+
+
+def notify_staff(conn, event: str, title: str, body: str = "", payload: dict[str, Any] | None = None, now: datetime | str | None = None) -> None:
+    for user_id in staff_user_ids(conn):
+        notify(user_id, event, title, body, payload, now=now, conn=conn)
 
 
 def is_off_hours_slot(day: str, time: str) -> bool:
@@ -664,9 +720,16 @@ def set_appointment_status(appointment_id: int, status: str, db_path: Path | Non
     return get_appointment(appointment_id, db_path)
 
 
-def office_appointments(db_path: Path | None = None) -> list[dict[str, Any]]:
+def office_appointments(db_path: Path | None = None, day: date | str | None = None) -> list[dict[str, Any]]:
+    day_s = parse_day(str(day) if day else None).isoformat() if day else None
     with get_conn(db_path) as conn:
-        rows = conn.execute("SELECT * FROM marketplace_appointments ORDER BY date, time").fetchall()
+        if day_s:
+            rows = conn.execute(
+                "SELECT * FROM marketplace_appointments WHERE date = ? ORDER BY time, id",
+                (day_s,),
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM marketplace_appointments ORDER BY date, time").fetchall()
     out = [_appointment_payload(dict(row)) for row in rows]
     imported = {row.get("booking_appointment_id") for row in out if row.get("booking_appointment_id")}
     for item in list_appointments(db_path):
@@ -688,6 +751,8 @@ def office_appointments(db_path: Path | None = None) -> list[dict[str, Any]]:
             }
         )
     out.sort(key=lambda row: (str(row.get("date") or ""), str(row.get("time") or "")))
+    if day_s:
+        out = [row for row in out if str(row.get("date") or "")[:10] == day_s]
     return out
 
 
@@ -759,9 +824,16 @@ def get_vehicle(vehicle_id: int, db_path: Path | None = None) -> dict[str, Any]:
     return _hydrate_vehicle(row, inspection)
 
 
-def list_vehicles(db_path: Path | None = None) -> list[dict[str, Any]]:
+def list_vehicles(db_path: Path | None = None, pipeline_only: bool = False) -> list[dict[str, Any]]:
     with get_conn(db_path) as conn:
-        rows = conn.execute("SELECT * FROM vehicles ORDER BY id DESC").fetchall()
+        if pipeline_only:
+            placeholders = ",".join("?" * len(PIPELINE_VEHICLE_STATUSES))
+            rows = conn.execute(
+                f"SELECT * FROM vehicles WHERE status IN ({placeholders}) ORDER BY id DESC",
+                PIPELINE_VEHICLE_STATUSES,
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM vehicles ORDER BY id DESC").fetchall()
         inspections = {
             item["vehicle_id"]: _inspection_from_row(item)
             for item in conn.execute(
@@ -990,8 +1062,8 @@ def publish_vehicle(
             """
             INSERT INTO auctions (
                 vehicle_id, status, start_time, end_time, starting_price, reserve_price, bid_increment,
-                current_price, published_at, participant_policy, created_at, updated_at
-            ) VALUES (?, 'ACTIVE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                current_price, published_at, participant_policy, created_at, updated_at, ledger_day
+            ) VALUES (?, 'ACTIVE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 vehicle_id,
@@ -1005,6 +1077,7 @@ def publish_vehicle(
                 participant_policy,
                 stamp.isoformat(timespec="seconds"),
                 stamp.isoformat(timespec="seconds"),
+                ledger_day_of(end),
             ),
         )
         auction_id = int(cur.lastrowid)
@@ -1155,6 +1228,21 @@ def _ensure_participant(conn, auction: dict[str, Any], buyer: dict[str, Any], cr
         )
 
 
+def close_expired_auctions(db_path: Path | None = None, now: datetime | str | None = None) -> list[int]:
+    stamp = now_iso(now)
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id FROM auctions WHERE status = 'ACTIVE' AND end_time <= ?",
+            (stamp,),
+        ).fetchall()
+    closed = []
+    for row in rows:
+        extra = close_if_expired(int(row["id"]), db_path=db_path, now=now)
+        if extra.get("status") != "ACTIVE":
+            closed.append(int(row["id"]))
+    return closed
+
+
 def close_if_expired(auction_id: int, db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
     stamp = parse_dt(now)
     with get_conn(db_path, immediate=True) as conn:
@@ -1174,7 +1262,13 @@ def _finish_auction(conn, auction: dict[str, Any], created: str, db_path: Path |
     winner_id = auction.get("current_winner_id")
     price = int(auction["current_price"])
     met = 1 if reserve_met(price, auction.get("reserve_price")) else 0
-    conn.execute("UPDATE auctions SET status = 'ENDED', updated_at = ? WHERE id = ?", (created, auction["id"]))
+    vehicle = conn.execute("SELECT brand, model FROM vehicles WHERE id = ?", (auction["vehicle_id"],)).fetchone()
+    car_label = " ".join(part for part in ((vehicle["brand"] if vehicle else ""), (vehicle["model"] if vehicle else "")) if part).strip() or f"مزایده #{auction['id']}"
+    price_label = f"{price:,}"
+    conn.execute(
+        "UPDATE auctions SET status = 'ENDED', ledger_day = ?, updated_at = ? WHERE id = ?",
+        (ledger_day_of(auction.get("end_time") or created), created, auction["id"]),
+    )
     conn.execute(
         "UPDATE vehicles SET status = 'BIDDING_ENDED', updated_at = ? WHERE id = ?",
         (created, auction["vehicle_id"]),
@@ -1189,9 +1283,37 @@ def _finish_auction(conn, auction: dict[str, Any], created: str, db_path: Path |
             (auction["id"], winner_id, price, met, created),
         )
         buyer = conn.execute("SELECT * FROM buyer_profiles WHERE id = ?", (winner_id,)).fetchone()
+        buyer_name = (buyer["contact_person"] if buyer else "") or (buyer["business_name"] if buyer else "") or f"#{winner_id}"
+        winner_payload = {
+            "auction_id": auction["id"],
+            "vehicle_id": auction["vehicle_id"],
+            "final_price": price,
+            "reserve_met": bool(met),
+            "brand": vehicle["brand"] if vehicle else "",
+            "model": vehicle["model"] if vehicle else "",
+            "buyer_id": winner_id,
+            "buyer_name": buyer_name,
+        }
         if buyer:
-            notify(buyer["user_id"], "YOU_WON" if met else "AUCTION_ENDED", "مزایده تمام شد", "", {"auction_id": auction["id"], "reserve_met": bool(met)}, db_path=db_path, conn=conn)
+            title = "شما برنده مزایده شدید" if met else "مزایده تمام شد — پیشنهاد شما بالاترین است"
+            notify(
+                buyer["user_id"],
+                "YOU_WON",
+                title,
+                f"{car_label} · مبلغ نهایی {price_label} تومان",
+                {k: winner_payload[k] for k in winner_payload if k not in {"buyer_id", "buyer_name"}},
+                db_path=db_path,
+                conn=conn,
+            )
             conn.execute("UPDATE buyer_profiles SET winning_bids = winning_bids + 1 WHERE id = ?", (winner_id,))
+        notify_staff(
+            conn,
+            "WINNER_READY",
+            "برنده مزایده مشخص شد",
+            f"{car_label} · برنده {buyer_name} · {price_label} تومان",
+            winner_payload,
+            now=created,
+        )
         others = conn.execute(
             "SELECT DISTINCT buyer_id FROM bids WHERE auction_id = ? AND buyer_id != ?",
             (auction["id"], winner_id),
@@ -1199,14 +1321,23 @@ def _finish_auction(conn, auction: dict[str, Any], created: str, db_path: Path |
         for other in others:
             profile = conn.execute("SELECT user_id FROM buyer_profiles WHERE id = ?", (other["buyer_id"],)).fetchone()
             if profile:
-                notify(profile["user_id"], "YOU_LOST", "مزایده را از دست دادید", "", {"auction_id": auction["id"]}, db_path=db_path, conn=conn)
+                notify(
+                    profile["user_id"],
+                    "YOU_LOST",
+                    "مزایده را از دست دادید",
+                    f"{car_label} به پیشنهاد دیگری رسید.",
+                    {"auction_id": auction["id"], "vehicle_id": auction["vehicle_id"]},
+                    db_path=db_path,
+                    conn=conn,
+                )
     else:
         users = conn.execute(
             "SELECT user_id FROM buyer_profiles WHERE id IN (SELECT buyer_id FROM auction_participants WHERE auction_id = ?)",
             (auction["id"],),
         ).fetchall()
         for user in users:
-            notify(user["user_id"], "AUCTION_ENDED", "مزایده بدون برنده تمام شد", "", {"auction_id": auction["id"]}, db_path=db_path, conn=conn)
+            notify(user["user_id"], "AUCTION_ENDED", "مزایده بدون برنده تمام شد", f"{car_label}", {"auction_id": auction["id"]}, db_path=db_path, conn=conn)
+        notify_staff(conn, "AUCTION_ENDED", "مزایده بدون برنده تمام شد", car_label, {"auction_id": auction["id"]}, now=created)
 
 
 def place_manual_bid(
@@ -1247,10 +1378,11 @@ def place_manual_bid(
         if should_extend(stamp, parse_dt(auction["end_time"]), bool(auction["anti_sniping_enabled"]), int(auction["extension_window_seconds"]), int(auction["extensions_used"]), int(auction["maximum_extensions"])):
             new_end = extend_end(parse_dt(auction["end_time"]), int(auction["extension_seconds"]))
             conn.execute(
-                "UPDATE auctions SET end_time = ?, extensions_used = extensions_used + 1, updated_at = ? WHERE id = ?",
-                (new_end.isoformat(timespec="seconds"), created, auction_id),
+                "UPDATE auctions SET end_time = ?, ledger_day = ?, extensions_used = extensions_used + 1, updated_at = ? WHERE id = ?",
+                (new_end.isoformat(timespec="seconds"), ledger_day_of(new_end), created, auction_id),
             )
             auction["end_time"] = new_end.isoformat(timespec="seconds")
+            auction["ledger_day"] = ledger_day_of(new_end)
         if previous_winner and auction.get("current_winner_id") != previous_winner:
             prev = conn.execute("SELECT user_id FROM buyer_profiles WHERE id = ?", (previous_winner,)).fetchone()
             if prev:
@@ -1305,8 +1437,8 @@ def set_auto_bid(
         if should_extend(stamp, parse_dt(auction["end_time"]), bool(auction["anti_sniping_enabled"]), int(auction["extension_window_seconds"]), int(auction["extensions_used"]), int(auction["maximum_extensions"])) and auction["current_price"] != previous_price:
             new_end = extend_end(parse_dt(auction["end_time"]), int(auction["extension_seconds"]))
             conn.execute(
-                "UPDATE auctions SET end_time = ?, extensions_used = extensions_used + 1, updated_at = ? WHERE id = ?",
-                (new_end.isoformat(timespec="seconds"), created, auction_id),
+                "UPDATE auctions SET end_time = ?, ledger_day = ?, extensions_used = extensions_used + 1, updated_at = ? WHERE id = ?",
+                (new_end.isoformat(timespec="seconds"), ledger_day_of(new_end), created, auction_id),
             )
         if previous_winner and auction.get("current_winner_id") != previous_winner:
             prev = conn.execute("SELECT user_id FROM buyer_profiles WHERE id = ?", (previous_winner,)).fetchone()
@@ -1394,6 +1526,24 @@ def buyer_may_see_auction(buyer: dict[str, Any], auction: dict[str, Any], db_pat
             (auction["id"], buyer["id"]),
         ).fetchone()
     return bool(row) and row["status"] not in {"REMOVED", "BLOCKED"}
+
+
+def buyer_may_list_bids(buyer: dict[str, Any], auction: dict[str, Any], db_path: Path | None = None) -> bool:
+    if not buyer_may_see_auction(buyer, auction, db_path):
+        return False
+    vehicle = get_vehicle(auction["vehicle_id"], db_path)
+    if vehicle.get("status") == "BIDDING_ACTIVE" and auction.get("status") == "ACTIVE" and buyer_can_see_vehicle(vehicle, auction):
+        return True
+    with get_conn(db_path) as conn:
+        mine = conn.execute(
+            "SELECT 1 FROM bids WHERE auction_id = ? AND buyer_id = ? LIMIT 1",
+            (auction["id"], buyer["id"]),
+        ).fetchone()
+        won = conn.execute(
+            "SELECT 1 FROM auction_winners WHERE auction_id = ? AND buyer_id = ? LIMIT 1",
+            (auction["id"], buyer["id"]),
+        ).fetchone()
+    return bool(mine or won)
 
 
 def buyer_auction_detail(auction_id: int, buyer: dict[str, Any], db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
@@ -1506,7 +1656,9 @@ def accept_winner(auction_id: int, db_path: Path | None = None, now: datetime | 
         buyer = conn.execute("SELECT * FROM buyer_profiles WHERE id = ?", (winner["buyer_id"],)).fetchone()
         if buyer:
             conn.execute("UPDATE buyer_profiles SET completed_transactions = completed_transactions + 1 WHERE id = ?", (buyer["id"],))
-            notify(buyer["user_id"], "OFFICE_ACCEPTED", "دفتر برنده را تأیید کرد", "", {"auction_id": auction_id}, db_path=db_path)
+            notify(buyer["user_id"], "OFFICE_ACCEPTED", "دفتر خرید شما را تأیید کرد", f"مزایده #{auction_id} به نام شما قطعی شد.", {"auction_id": auction_id}, conn=conn)
+        notify_staff(conn, "WINNER_ACCEPTED", "برنده تأیید شد", f"مزایده #{auction_id}", {"auction_id": auction_id}, now=created)
+        bump_live(conn)
         return dict(conn.execute("SELECT * FROM auction_winners WHERE auction_id = ?", (auction_id,)).fetchone())
 
 
@@ -1521,19 +1673,37 @@ def reject_winner(auction_id: int, db_path: Path | None = None, now: datetime | 
         buyer = conn.execute("SELECT * FROM buyer_profiles WHERE id = ?", (winner["buyer_id"],)).fetchone()
         if buyer:
             conn.execute("UPDATE buyer_profiles SET cancelled_transactions = cancelled_transactions + 1 WHERE id = ?", (buyer["id"],))
-            notify(buyer["user_id"], "OFFICE_REJECTED", "دفتر برنده را رد کرد", "", {"auction_id": auction_id}, db_path=db_path)
+            notify(buyer["user_id"], "OFFICE_REJECTED", "دفتر برنده را رد کرد", f"مزایده #{auction_id}", {"auction_id": auction_id}, conn=conn)
+        bump_live(conn)
         return dict(conn.execute("SELECT * FROM auction_winners WHERE auction_id = ?", (auction_id,)).fetchone())
 
 
-def office_dashboard(db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
-    for auction in list_auctions(db_path):
-        if auction["status"] == "ACTIVE":
-            close_if_expired(auction["id"], db_path=db_path, now=now)
+def office_dashboard(db_path: Path | None = None, now: datetime | str | None = None, day: str | None = None) -> dict[str, Any]:
+    close_expired_auctions(db_path, now=now)
+    day_obj = parse_day(day) if day else None
+    appointments = office_appointments(db_path, day=day_obj)
+    if day_obj:
+        day_meta = {
+            "day": day_obj.isoformat(),
+            "jalali": format_jalali(day_obj),
+            "prev_day": (day_obj - timedelta(days=1)).isoformat(),
+            "next_day": (day_obj + timedelta(days=1)).isoformat(),
+        }
+    else:
+        day_meta = {"day": "", "jalali": "همه روزها", "prev_day": "", "next_day": ""}
+    pending_winners = [row for row in list_winners(db_path) if row["status"] == "PENDING_OFFICE_CONFIRMATION"]
+    pending_ids = {row["auction_id"] for row in pending_winners}
+    live_auctions = [
+        row
+        for row in list_auctions(db_path)
+        if row["status"] == "ACTIVE" or row["id"] in pending_ids
+    ]
     return {
-        "appointments": office_appointments(db_path),
-        "vehicles": list_vehicles(db_path),
-        "auctions": list_auctions(db_path),
-        "winners": list_winners(db_path),
+        **day_meta,
+        "appointments": appointments,
+        "vehicles": list_vehicles(db_path, pipeline_only=True),
+        "auctions": live_auctions,
+        "winners": pending_winners,
         "buyers": list_buyers(db_path),
     }
 

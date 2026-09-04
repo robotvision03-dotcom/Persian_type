@@ -6,8 +6,8 @@
     <title>دفتر مرکز</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=17" />
-    <link rel="stylesheet" href="/static/portal.css?v=17" />
+    <link rel="stylesheet" href="/static/styles.css?v=19" />
+    <link rel="stylesheet" href="/static/portal.css?v=19" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -33,25 +33,63 @@
         </form>
       </section>
       <div id="app-box" class="hidden">
+        <section class="panel" id="notes-panel">
+          <div class="panel-head">
+            <h2>اعلان‌ها</h2>
+            <button class="ghost" id="notes-read" type="button">همه خوانده شد</button>
+          </div>
+          <div id="notes" class="empty">اعلانی نیست.</div>
+        </section>
         <section class="panel">
           <div class="panel-head">
             <h2>نوبت‌ها</h2>
             <button class="ghost" id="logout-btn" type="button">خروج</button>
           </div>
-          <form id="appt-form" class="actions">
+          <div class="day-nav">
+            <button class="ghost" type="button" id="appt-prev">روز قبل</button>
+            <strong id="appt-label">امروز</strong>
+            <button class="ghost" type="button" id="appt-next">روز بعد</button>
+            <button class="ghost" type="button" id="appt-today">امروز</button>
+          </div>
+          <form id="appt-form" class="vehicle-form">
             <input type="hidden" name="appointment_id" value="" />
-            <input name="date" type="date" required />
-            <input name="time" type="time" required />
+            <input type="hidden" name="date" id="appt-date" required />
+            <input type="hidden" name="time" id="appt-time" required />
+            <h4>ثبت نوبت</h4>
+            <p class="hint">تاریخ شمسی و ساعت را از جدول انتخاب کنید. جمعه و بعد از ۱۷ هم برای دفتر مجاز است.</p>
+            <div class="picker" data-picker="appt">
+              <div class="cal-nav">
+                <button class="ghost pick-prev" type="button">ماه قبل</button>
+                <strong class="pick-month">تقویم</strong>
+                <button class="ghost pick-next" type="button">ماه بعد</button>
+              </div>
+              <div class="weekdays"><span>ش</span><span>ی</span><span>د</span><span>س</span><span>چ</span><span>پ</span><span>ج</span></div>
+              <div class="weeks"></div>
+              <p class="pick-label hint"></p>
+              <div class="times"></div>
+            </div>
             <input name="customer_name" placeholder="نام مشتری" />
             <input name="customer_phone" placeholder="تلفن" />
-            <button class="start" type="submit">ثبت نوبت</button>
-            <button class="ghost hidden" id="cancel-edit" type="button">انصراف ویرایش</button>
+            <div class="actions">
+              <button class="start" type="submit">ثبت نوبت</button>
+              <button class="ghost hidden" id="cancel-edit" type="button">انصراف ویرایش</button>
+            </div>
           </form>
-          <p class="hint">نوبت دفتر هر ساعتی ثبت می‌شود، حتی جمعه و خارج از ۹ تا ۱۷.</p>
           <form id="express-form" class="vehicle-form">
             <h4>ورود خارج از نوبت / مزایده فوری</h4>
-            <input name="date" type="date" required />
-            <input name="time" type="time" required />
+            <input type="hidden" name="date" />
+            <input type="hidden" name="time" />
+            <div class="picker" data-picker="express">
+              <div class="cal-nav">
+                <button class="ghost pick-prev" type="button">ماه قبل</button>
+                <strong class="pick-month">تقویم</strong>
+                <button class="ghost pick-next" type="button">ماه بعد</button>
+              </div>
+              <div class="weekdays"><span>ش</span><span>ی</span><span>د</span><span>س</span><span>چ</span><span>پ</span><span>ج</span></div>
+              <div class="weeks"></div>
+              <p class="pick-label hint"></p>
+              <div class="times"></div>
+            </div>
             <input name="customer_name" placeholder="نام مشتری" />
             <input name="customer_phone" placeholder="تلفن" />
             <input name="brand" placeholder="برند" />
@@ -66,6 +104,20 @@
         <section class="panel">
           <h2>خودروها و مزایده</h2>
           <div id="vehicles"></div>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>گزارش روزانه مزایده</h2>
+          </div>
+          <div class="day-nav">
+            <button class="ghost" type="button" id="hist-prev">روز قبل</button>
+            <strong id="hist-label">امروز</strong>
+            <button class="ghost" type="button" id="hist-next">روز بعد</button>
+            <button class="ghost" type="button" id="hist-today">امروز</button>
+          </div>
+          <p id="hist-summary" class="hint"></p>
+          <div id="history"></div>
+          <div class="day-nav" id="hist-pages"></div>
         </section>
         <section class="panel">
           <h2>خریداران</h2>
@@ -86,6 +138,6 @@
         </section>
       </div>
     </main>
-    <script src="/static/office.js?v=17"></script>
+    <script src="/static/office.js?v=19"></script>
   </body>
 </html>

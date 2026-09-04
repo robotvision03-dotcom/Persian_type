@@ -6,8 +6,8 @@
     <title>پورتال خریدار</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=17" />
-    <link rel="stylesheet" href="/static/portal.css?v=17" />
+    <link rel="stylesheet" href="/static/styles.css?v=19" />
+    <link rel="stylesheet" href="/static/portal.css?v=19" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -46,6 +46,12 @@
             <button class="ghost" id="logout-btn" type="button">خروج</button>
           </div>
           <p id="account-line" class="hint"></p>
+          <div id="winner-banner" class="notice-win hidden"></div>
+          <div class="panel-head">
+            <h3>اعلان‌ها</h3>
+            <button class="ghost" id="notes-read" type="button">همه خوانده شد</button>
+          </div>
+          <div id="notes" class="empty">اعلانی نیست.</div>
           <form id="profile-form" class="vehicle-form">
             <h4>ویرایش پروفایل</h4>
             <label class="spec-field"><span>نام خریدار</span><input name="contact_person" required /></label>
@@ -69,11 +75,21 @@
           <div id="appts" class="empty">نوبتی نیست.</div>
         </section>
         <section class="panel">
-          <h2>تاریخچه من</h2>
-          <div id="history" class="hint"></div>
+          <div class="panel-head">
+            <h2>تاریخچه روزانه پیشنهادها</h2>
+          </div>
+          <div class="day-nav">
+            <button class="ghost" type="button" id="hist-prev">روز قبل</button>
+            <strong id="hist-label">امروز</strong>
+            <button class="ghost" type="button" id="hist-next">روز بعد</button>
+            <button class="ghost" type="button" id="hist-today">امروز</button>
+          </div>
+          <p id="hist-summary" class="hint"></p>
+          <div id="history"></div>
+          <div class="day-nav" id="hist-pages"></div>
         </section>
       </div>
     </main>
-    <script src="/static/buyer.js?v=17"></script>
+    <script src="/static/buyer.js?v=19"></script>
   </body>
 </html>

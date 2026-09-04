@@ -179,3 +179,84 @@
   color: var(--gold);
   font-size: 0.78rem;
 }
+
+.day-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 10px 0;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.history-table th,
+.history-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 8px 6px;
+  text-align: right;
+}
+
+.bid-box {
+  margin-top: 8px;
+  overflow-x: auto;
+}
+
+.picker {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px;
+  margin: 8px 0 14px;
+  background: rgba(18, 42, 33, 0.35);
+}
+
+.picker .times {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  max-height: 220px;
+  overflow: auto;
+}
+
+.notice-win {
+  border: 1px solid rgba(201, 162, 39, 0.55);
+  background: rgba(201, 162, 39, 0.14);
+  color: #f6f1e4;
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin: 10px 0;
+  line-height: 1.8;
+}
+
+.notice-win.hidden,
+.hidden {
+  display: none;
+}
+
+.note-list {
+  display: grid;
+  gap: 8px;
+}
+
+.note-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(244, 239, 226, 0.04);
+}
+
+.note-card.unread {
+  border-color: rgba(201, 162, 39, 0.45);
+  background: rgba(201, 162, 39, 0.08);
+}
+
+.note-card h4 {
+  margin: 0 0 4px;
+}
+
+.winner-row {
+  color: var(--gold);
+  font-weight: 700;
+}

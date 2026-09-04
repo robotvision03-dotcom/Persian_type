@@ -83,6 +83,108 @@ function renderInspection(item) {
 let liveRevision = 0;
 let liveTimer = null;
 let refreshing = false;
+let historyDay = "";
+let historyPage = 1;
+let historyPrev = "";
+let historyNext = "";
+
+function todayIso() {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+function renderNotes(rows) {
+  const box = $("notes");
+  if (!box) return;
+  const items = rows || [];
+  const wins = items.filter((row) => row.event === "YOU_WON" && row.unread);
+  const banner = $("winner-banner");
+  if (banner) {
+    if (wins.length) {
+      banner.classList.remove("hidden");
+      banner.innerHTML = wins
+        .map((row) => `<strong>${escapeHtml(row.title)}</strong><br />${escapeHtml(row.body || "")}`)
+        .join("<hr />");
+    } else {
+      banner.classList.add("hidden");
+      banner.innerHTML = "";
+    }
+  }
+  if (!items.length) {
+    box.className = "empty";
+    box.textContent = "اعلانی نیست.";
+    return;
+  }
+  box.className = "note-list";
+  box.innerHTML = items
+    .map(
+      (row) => `<article class="note-card ${row.unread ? "unread" : ""} ${row.event === "YOU_WON" ? "notice-win" : ""}">
+        <h4>${escapeHtml(row.title)}</h4>
+        <p>${escapeHtml(row.body || "")}</p>
+        <p class="hint">${escapeHtml(row.created_at || "")}</p>
+        ${row.unread ? `<button class="ghost note-read" type="button" data-note="${row.id}">خواندم</button>` : ""}
+      </article>`
+    )
+    .join("");
+}
+
+async function loadNotes() {
+  renderNotes(await api("/buyers/me/notifications"));
+}
+
+async function loadHistory(day, page) {
+  if (day) historyDay = day;
+  if (page) historyPage = page;
+  const query = new URLSearchParams({ day: historyDay || todayIso(), page: String(historyPage || 1) });
+  const data = await api("/buyer/history?" + query.toString());
+  historyDay = data.day;
+  historyPage = data.page;
+  historyPrev = data.prev_day;
+  historyNext = data.next_day;
+  $("hist-label").textContent = data.jalali;
+  $("hist-summary").textContent = `${data.total_auctions} مزایده شما · ${data.total_bids} پیشنهاد`;
+  if (!data.auctions.length) {
+    $("history").innerHTML = `<p class="empty">برای این روز پیشنهادی ثبت نشده است.</p>`;
+  } else {
+    $("history").innerHTML = data.auctions
+      .map((row) => {
+        let winner = "نتیجه هنوز اعلام نشده";
+        if (row.winner) {
+          winner = row.winner.is_mine
+            ? `<span class="winner-row">شما برنده شدید · ${money(row.winner.final_price)} · ${escapeHtml(row.winner.status)}</span>`
+            : `مزایده تمام شد · مبلغ نهایی ${money(row.winner.final_price)}`;
+        }
+        return `<article class="card">
+          <h3>${escapeHtml(row.vehicle.brand || "خودرو")} ${escapeHtml(row.vehicle.model || "")} · مزایده #${row.id}</h3>
+          <p>وضعیت ${escapeHtml(row.status)} · ${row.bid_count} پیشنهاد · پایان ${escapeHtml(row.end_time || "")}</p>
+          <p>${winner}</p>
+          <button class="ghost view-bids" type="button" data-id="${row.id}">فهرست پیشنهادهای این مزایده</button>
+          <div class="bid-box" data-bids="${row.id}"></div>
+        </article>`;
+      })
+      .join("");
+  }
+  $("hist-pages").innerHTML = data.pages > 1
+    ? `<button class="ghost hist-page" type="button" data-page="${Math.max(1, data.page - 1)}" ${data.page <= 1 ? "disabled" : ""}>صفحه قبل</button>
+       <span>صفحه ${data.page} از ${data.pages}</span>
+       <button class="ghost hist-page" type="button" data-page="${Math.min(data.pages, data.page + 1)}" ${data.page >= data.pages ? "disabled" : ""}>صفحه بعد</button>`
+    : "";
+}
+
+async function loadBids(auctionId, page) {
+  const box = document.querySelector(`[data-bids="${auctionId}"]`);
+  if (!box) return;
+  const data = await api(`/auctions/${auctionId}/bids?page=${page || 1}&page_size=20`);
+  const rows = (data.items || [])
+    .map((row) => `<tr><td>${row.is_mine ? "پیشنهاد شما" : "خریدار دیگر"}</td><td>${money(row.amount)}</td><td>${escapeHtml(row.bid_type)}</td><td>${escapeHtml(row.created_at)}</td></tr>`)
+    .join("");
+  box.innerHTML = `<table class="history-table"><thead><tr><th>چه کسی</th><th>مبلغ</th><th>نوع</th><th>زمان</th></tr></thead><tbody>${rows || `<tr><td colspan="4">پیشنهادی نیست</td></tr>`}</tbody></table>
+    <div class="day-nav">
+      <button class="ghost bid-page" type="button" data-id="${auctionId}" data-page="${Math.max(1, (data.page || 1) - 1)}">قبلی</button>
+      <span>صفحه ${data.page} از ${data.pages}</span>
+      <button class="ghost bid-page" type="button" data-id="${auctionId}" data-page="${Math.min(data.pages, (data.page || 1) + 1)}">بعدی</button>
+    </div>`;
+}
 
 function snapshotBids() {
   const out = {};
@@ -181,8 +283,11 @@ async function refresh(options) {
     $("appts").innerHTML = appts.length
       ? `<ul>${appts.map((row) => `<li>${row.date} ${row.time} — نوبت</li>`).join("")}</ul>`
       : "نوبتی نیست.";
-    const hist = await api("/buyers/me/auctions");
-    $("history").textContent = `فعال: ${(hist.active || []).length} · برنده: ${(hist.winning || []).length} · از دست رفته: ${(hist.lost || []).length}`;
+    await loadNotes();
+    if (!(options && options.live)) {
+      if (!historyDay) historyDay = todayIso();
+      await loadHistory(historyDay, historyPage);
+    }
     startLive();
   } catch (error) {
     if (String(error.message).includes("وارد")) {
@@ -264,6 +369,50 @@ $("logout-btn").addEventListener("click", async () => {
 });
 
 document.addEventListener("click", async (event) => {
+  if (event.target.closest("#hist-prev")) {
+    historyDay = historyPrev || historyDay;
+    historyPage = 1;
+    await loadHistory();
+    return;
+  }
+  if (event.target.closest("#hist-next")) {
+    historyDay = historyNext || historyDay;
+    historyPage = 1;
+    await loadHistory();
+    return;
+  }
+  if (event.target.closest("#hist-today")) {
+    historyDay = todayIso();
+    historyPage = 1;
+    await loadHistory();
+    return;
+  }
+  const histPage = event.target.closest(".hist-page");
+  if (histPage) {
+    await loadHistory(historyDay, Number(histPage.getAttribute("data-page") || 1));
+    return;
+  }
+  const viewBids = event.target.closest(".view-bids");
+  if (viewBids) {
+    await loadBids(viewBids.getAttribute("data-id"), 1);
+    return;
+  }
+  const bidPage = event.target.closest(".bid-page");
+  if (bidPage) {
+    await loadBids(bidPage.getAttribute("data-id"), bidPage.getAttribute("data-page"));
+    return;
+  }
+  const noteRead = event.target.closest(".note-read");
+  if (noteRead) {
+    await api("/notifications/read", { method: "POST", body: JSON.stringify({ ids: [Number(noteRead.getAttribute("data-note"))] }) });
+    await loadNotes();
+    return;
+  }
+  if (event.target.closest("#notes-read")) {
+    await api("/notifications/read", { method: "POST", body: JSON.stringify({ ids: [] }) });
+    await loadNotes();
+    return;
+  }
   const useMin = event.target.closest(".use-min-btn");
   if (useMin) {
     const id = useMin.getAttribute("data-id");
