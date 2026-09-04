@@ -17,8 +17,8 @@ CONFIG_PATH = Path(__file__).resolve().parent.parent / "data" / "whatsapp.json"
 
 
 def software_number() -> str:
-    raw = os.environ.get("WHATSAPP_FROM") or SOFTWARE_WHATSAPP
-    digits = whatsapp_digits(raw)
+    raw = os.environ.get("WHATSAPP_FROM") or load_config().get("from") or SOFTWARE_WHATSAPP
+    digits = whatsapp_digits(str(raw))
     return f"+{digits}" if digits else SOFTWARE_WHATSAPP
 
 
