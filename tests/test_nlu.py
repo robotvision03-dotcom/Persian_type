@@ -24,6 +24,7 @@ class SlotFillTests(unittest.TestCase):
     def test_next_phase_skips_filled_model(self):
         self.assertEqual(next_missing_phase("پژو", "206", None, ""), "ask_km")
         self.assertEqual(next_missing_phase("پژو", "", None, ""), "ask_model")
+        self.assertEqual(next_missing_phase("پژو", "206", 80000, "علی رضایی"), "await_calendar")
 
     def test_partial_letters_resolve_samand(self):
         slots = parse_slots("سمن", "ask_car")

@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/static/styles.css?v=5" />
+    <link rel="stylesheet" href="/static/styles.css?v=6" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -22,6 +22,7 @@
           تقویم شمسی است؛ <strong>جمعه تعطیل</strong> و شنبه تا پنجشنبه از ۹ تا ۱۷ باز است.
           ساعت‌های خالی از همان سلام منشی روی صفحه می‌ماند. نام خودرو را بگویید —
           حتی اگر حرفی جا بیفتد (مثلاً سمن → سمند) از فهرست خودروهای موجود در ایران پیدا می‌شود.
+          بعد از نام، لینک تقویم به واتساپ مشتری فرستاده می‌شود تا خودش وقت خالی را بزند.
         </p>
       </div>
       <div class="pills">
@@ -45,6 +46,13 @@
         </form>
         <div class="meter"><span id="level-bar"></span></div>
         <p id="partial-line" class="partial"></p>
+        <div id="invite-box" class="invite-box hidden">
+          <p id="invite-text"></p>
+          <div class="invite-actions">
+            <a id="wa-link" class="start" target="_blank" rel="noopener">ارسال در واتساپ</a>
+            <a id="cal-link" class="ghost" target="_blank" rel="noopener">باز کردن تقویم مشتری</a>
+          </div>
+        </div>
       </section>
 
       <div class="side">
@@ -73,6 +81,6 @@
       <div class="spinner"></div>
       <p id="overlay-text">در حال آماده‌سازی...</p>
     </div>
-    <script src="/static/app.js?v=5"></script>
+    <script src="/static/app.js?v=6"></script>
   </body>
 </html>

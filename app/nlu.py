@@ -20,6 +20,7 @@ PHASE_ASK_MODEL = "ask_model"
 PHASE_ASK_KM = "ask_km"
 PHASE_ASK_NAME = "ask_name"
 PHASE_ASK_SLOT = "ask_slot"
+PHASE_AWAIT_CALENDAR = "await_calendar"
 PHASE_BOOKED = "booked"
 
 YES_WORDS = ("بله", "آره", "اره", "باشه", "باشِ", "موافقم", "چشم", "حتما", "اوکی", "ok", "yes")
@@ -136,4 +137,4 @@ def next_missing_phase(car_name: str, car_model: str, km: int | None, customer_n
         return PHASE_ASK_KM
     if not customer_name:
         return PHASE_ASK_NAME
-    return PHASE_ASK_SLOT
+    return PHASE_AWAIT_CALENDAR

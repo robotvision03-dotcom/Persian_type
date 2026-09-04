@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -18,12 +18,15 @@ from .audio import TARGET_RATE, concat, int16_bytes_to_float32
 from .booking import (
     available_slots,
     book_appointment,
+    book_invite,
+    get_invite,
     hours_panel,
     init_db,
     is_office_open,
     list_appointments,
     month_calendar,
     slot_times,
+    whatsapp_send_url,
 )
 from .cars import catalog_payload, match_vehicle
 from .iranian_names import match_person_name, name_catalog_counts
@@ -56,6 +59,29 @@ class BookBody(BaseModel):
     km: int | None = None
     date: str
     time: str
+
+
+class InviteBookBody(BaseModel):
+    date: str
+    time: str
+
+
+def attach_invite_urls(invite: dict[str, Any] | None, origin: str) -> dict[str, Any] | None:
+    if not invite:
+        return None
+    base = (origin or "").rstrip("/")
+    calendar_url = f"{base}{invite.get('calendar_path') or '/book/' + invite['token']}"
+    message = (
+        f"سلام {invite['customer_name']} عزیز\n"
+        f"برای بازدید و خرید {invite['car_name']} {invite['car_model']} "
+        f"این لینک تقویم نوبت‌های خالی است:\n{calendar_url}\n"
+        "روی لینک بزنید و یک وقت آزاد انتخاب کنید."
+    )
+    extra = dict(invite)
+    extra["calendar_url"] = calendar_url
+    extra["whatsapp_url"] = whatsapp_send_url(message, invite.get("phone"))
+    extra["whatsapp_text"] = message
+    return extra
 
 
 class AppState:
@@ -179,9 +205,12 @@ def call_start(body: StartBody | None = None) -> dict[str, Any]:
 
 
 @app.post("/api/call/turn")
-def call_turn(body: TurnBody) -> dict[str, Any]:
+def call_turn(body: TurnBody, request: Request) -> dict[str, Any]:
     payload = state.dialogue.handle(body.session_id, body.text)
     payload["session_id"] = body.session_id
+    origin = str(request.base_url).rstrip("/")
+    if payload.get("invite"):
+        payload["invite"] = attach_invite_urls(payload["invite"], origin)
     return payload
 
 
@@ -301,6 +330,12 @@ async def stream_call(websocket: WebSocket) -> None:
             await websocket.send_json({"type": "ignore", "text": text_out})
             return
         turn = await asyncio.to_thread(state.dialogue.handle, session_id, text_out)
+        if turn and turn.get("invite"):
+            origin = websocket.headers.get("origin") or f"{websocket.url.scheme}://{websocket.url.hostname}"
+            if origin.startswith("ws"):
+                origin = "http" + origin[2:]
+            turn = dict(turn)
+            turn["invite"] = attach_invite_urls(turn["invite"], origin.rstrip("/"))
         await websocket.send_json({"type": "assistant", "text": text_out, "turn": turn})
 
     try:
@@ -350,6 +385,33 @@ async def stream_call(websocket: WebSocket) -> None:
             await websocket.close()
         except Exception:
             pass
+
+
+@app.get("/api/invite/{token}")
+def invite_get(token: str) -> dict[str, Any]:
+    invite = get_invite(token, db_path=state.db_path)
+    if invite is None:
+        raise HTTPException(status_code=404, detail="این لینک تقویم پیدا نشد.")
+    return {
+        "invite": invite,
+        "calendar": month_calendar(db_path=state.db_path),
+    }
+
+
+@app.post("/api/invite/{token}/book")
+def invite_book(token: str, body: InviteBookBody) -> dict[str, Any]:
+    try:
+        return book_invite(token, body.date, body.time, db_path=state.db_path)
+    except ValueError as extra:
+        raise HTTPException(status_code=409, detail=str(extra)) from extra
+
+
+@app.get("/book/{token}")
+def customer_calendar(token: str) -> FileResponse:
+    invite = get_invite(token, db_path=state.db_path)
+    if invite is None:
+        raise HTTPException(status_code=404, detail="این لینک تقویم پیدا نشد.")
+    return FileResponse(STATIC_DIR / "book.html")
 
 
 @app.get("/")

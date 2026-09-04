@@ -55,8 +55,25 @@ def init_db(db_path: Path | None = None) -> None:
             );
             CREATE UNIQUE INDEX IF NOT EXISTS idx_appt_slot
                 ON appointments(date, time) WHERE status = 'booked';
+            CREATE TABLE IF NOT EXISTS booking_invites (
+                token TEXT PRIMARY KEY,
+                customer_name TEXT NOT NULL,
+                car_name TEXT NOT NULL,
+                car_model TEXT NOT NULL,
+                km INTEGER,
+                phone TEXT NOT NULL,
+                session_id TEXT,
+                created_at TEXT NOT NULL,
+                appointment_id INTEGER,
+                status TEXT NOT NULL DEFAULT 'pending'
+            );
             """
         )
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(appointments)")}
+        if "phone" not in columns:
+            conn.execute("ALTER TABLE appointments ADD COLUMN phone TEXT")
+        if "invite_token" not in columns:
+            conn.execute("ALTER TABLE appointments ADD COLUMN invite_token TEXT")
 
 
 def is_office_open(day: date) -> bool:
@@ -185,6 +202,96 @@ def month_calendar(jy: int | None = None, jm: int | None = None, db_path: Path |
     }
 
 
+DEFAULT_WHATSAPP = "+989032901549"
+
+
+def whatsapp_digits(phone: str | None = None) -> str:
+    raw = phone or DEFAULT_WHATSAPP
+    return "".join(char for char in raw if char.isdigit())
+
+
+def whatsapp_send_url(text: str, phone: str | None = None) -> str:
+    from urllib.parse import quote
+
+    return f"https://wa.me/{whatsapp_digits(phone)}?text={quote(text)}"
+
+
+def create_invite(
+    customer_name: str,
+    car_name: str,
+    car_model: str,
+    km: int | None,
+    session_id: str = "",
+    phone: str | None = None,
+    db_path: Path | None = None,
+) -> dict[str, Any]:
+    import secrets
+
+    init_db(db_path)
+    token = secrets.token_urlsafe(8).replace("_", "").replace("-", "")[:12]
+    created = datetime.now().isoformat(timespec="seconds")
+    number = phone or DEFAULT_WHATSAPP
+    with get_conn(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO booking_invites
+                (token, customer_name, car_name, car_model, km, phone, session_id, created_at, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            """,
+            (token, customer_name, car_name, car_model, km, number, session_id, created),
+        )
+    return get_invite(token, db_path)
+
+
+def get_invite(token: str, db_path: Path | None = None) -> dict[str, Any] | None:
+    init_db(db_path)
+    with get_conn(db_path) as conn:
+        row = conn.execute("SELECT * FROM booking_invites WHERE token = ?", (token,)).fetchone()
+    if row is None:
+        return None
+    item = dict(row)
+    item["calendar_path"] = f"/book/{token}"
+    return item
+
+
+def book_invite(token: str, day: str, time: str, db_path: Path | None = None) -> dict[str, Any]:
+    invite = get_invite(token, db_path)
+    if invite is None:
+        raise ValueError("این لینک تقویم معتبر نیست.")
+    if invite["status"] == "booked" and invite.get("appointment_id"):
+        raise ValueError("از این لینک قبلاً نوبت گرفته شده است.")
+    appt_id = book_appointment(
+        invite["customer_name"],
+        invite["car_name"],
+        invite["car_model"],
+        invite["km"],
+        day,
+        time,
+        db_path=db_path,
+        phone=invite["phone"],
+        invite_token=token,
+    )
+    with get_conn(db_path) as conn:
+        conn.execute(
+            "UPDATE booking_invites SET status = 'booked', appointment_id = ? WHERE token = ?",
+            (appt_id, token),
+        )
+    slot_day = date.fromisoformat(day)
+    return {
+        "ok": True,
+        "id": appt_id,
+        "token": token,
+        "date": day,
+        "time": time,
+        "jalali": format_jalali(slot_day),
+        "customer_name": invite["customer_name"],
+        "car_name": invite["car_name"],
+        "car_model": invite["car_model"],
+        "phone": invite["phone"],
+        "message": "نوبت از روی تقویم واتساپ ثبت شد.",
+    }
+
+
 def book_appointment(
     customer_name: str,
     car_name: str,
@@ -193,6 +300,8 @@ def book_appointment(
     day: str,
     time: str,
     db_path: Path | None = None,
+    phone: str | None = None,
+    invite_token: str | None = None,
 ) -> int:
     init_db(db_path)
     if time not in available_slots(day, db_path):
@@ -202,10 +311,10 @@ def book_appointment(
         cur = conn.execute(
             """
             INSERT INTO appointments
-                (customer_name, car_name, car_model, km, date, time, created_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'booked')
+                (customer_name, car_name, car_model, km, date, time, created_at, status, phone, invite_token)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'booked', ?, ?)
             """,
-            (customer_name, car_name, car_model, km, day, time, created),
+            (customer_name, car_name, car_model, km, day, time, created, phone, invite_token),
         )
         return int(cur.lastrowid)
 

@@ -87,6 +87,19 @@ async function fetchState() {
   applyState(await response.json());
 }
 
+function showInvite(invite) {
+  if (!invite) return;
+  const box = $("invite-box");
+  box.classList.remove("hidden");
+  $("invite-text").textContent =
+    `لینک تقویم به واتساپ ${invite.phone || "+989032901549"} ارسال می‌شود. مشتری روی لینک می‌زند و وقت خالی را از تقویم انتخاب می‌کند.`;
+  if (invite.whatsapp_url) {
+    $("wa-link").href = invite.whatsapp_url;
+    window.open(invite.whatsapp_url, "_blank");
+  }
+  if (invite.calendar_url) $("cal-link").href = invite.calendar_url;
+}
+
 function applyTurn(payload, userText) {
   if (userText) addMsg("user", userText, "مشتری");
   if (payload?.reply) {
@@ -96,14 +109,20 @@ function applyTurn(payload, userText) {
   if (payload?.appointment_id) loadAppts();
   if (payload?.hours?.date) selectedDate = payload.hours.date;
   loadCalendar();
+  if (payload?.phase === "await_calendar") {
+    showInvite(payload.invite);
+    if (inCall) hangup("لینک واتساپ ارسال شد");
+    else statusLine.textContent = "لینک واتساپ ارسال شد";
+  }
   if (payload?.phase === "booked") {
-    statusLine.textContent = "نوبت ثبت شد";
-    if (inCall) hangup();
+    if (inCall) hangup("نوبت ثبت شد");
+    else statusLine.textContent = "نوبت ثبت شد";
   }
 }
 
 async function beginSession() {
   logEl.innerHTML = "";
+  $("invite-box") && $("invite-box").classList.add("hidden");
   const payload = await fetch("/api/call/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -376,7 +395,7 @@ function teardownAudio() {
   levelBar.style.width = "0%";
 }
 
-async function hangup() {
+async function hangup(statusText) {
   awaitingTurn = false;
   speaking = false;
   window.speechSynthesis && window.speechSynthesis.cancel();
@@ -397,7 +416,7 @@ async function hangup() {
   } catch (_error) {}
   partialLine.textContent = "";
   setCallUi(false);
-  statusLine.textContent = "تماس تمام شد";
+  statusLine.textContent = statusText || "تماس تمام شد";
 }
 
 async function startCall() {

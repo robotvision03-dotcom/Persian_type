@@ -11,21 +11,16 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
-from datetime import date
-
 from . import booking
 from .cars import brand_models
-from .jalali import format_jalali
-from .numbers import parse_clock
 from .nlu import (
-    NO_WORDS,
     PHASE_ASK_CAR,
     PHASE_ASK_KM,
     PHASE_ASK_MODEL,
     PHASE_ASK_NAME,
     PHASE_ASK_SLOT,
+    PHASE_AWAIT_CALENDAR,
     PHASE_BOOKED,
-    YES_WORDS,
     next_missing_phase,
     parse_km,
     parse_slots,
@@ -58,6 +53,8 @@ class CallSession:
     appointment_id: int | None = None
     messages: list[dict[str, str]] = field(default_factory=list)
     live: bool = False
+    phone: str = booking.DEFAULT_WHATSAPP
+    invite: dict[str, Any] | None = None
 
 
 class DialogueManager:
@@ -98,8 +95,14 @@ class DialogueManager:
         session.messages.append({"role": "user", "content": text})
         if session.phase == PHASE_BOOKED:
             return self._reply(session, text, "نوبت شما ثبت شده است. برای نوبت تازه، تماس جدید بزنید.")
+        if session.phase == PHASE_AWAIT_CALENDAR:
+            return self._reply(
+                session,
+                text,
+                "لینک تقویم روی واتساپ برایتان ارسال شده. از همان لینک وقت خالی را انتخاب کنید.",
+            )
         if session.phase == PHASE_ASK_SLOT:
-            return self._on_slot(session, text)
+            return self._send_calendar_link(session, text)
 
         slots = parse_slots(text, session.phase, prefer_brand=session.car_name)
         if session.phase == PHASE_ASK_CAR and slots.get("candidates") and not slots.get("car_name"):
@@ -147,8 +150,8 @@ class DialogueManager:
             return self._reply(session, text, ASK_REPEAT)
 
         session.phase = nxt
-        if nxt == PHASE_ASK_SLOT:
-            return self._offer_slots(session, text)
+        if nxt in {PHASE_ASK_SLOT, PHASE_AWAIT_CALENDAR}:
+            return self._send_calendar_link(session, text)
         if nxt == PHASE_ASK_MODEL:
             models = brand_models(session.car_name)
             if models:
@@ -160,77 +163,22 @@ class DialogueManager:
                 )
         return self._reply(session, text, PROMPTS[nxt])
 
-    def _offer_slots(self, session: CallSession, text: str) -> dict[str, Any]:
-        slots = booking.next_open_slots(limit=3, db_path=self.db_path)
-        session.offered_slots = slots
-        session.phase = PHASE_ASK_SLOT
-        if not slots:
-            return self._reply(session, text, "در روزهای کاری نوبت خالی پیدا نشد.")
-        labels = "، ".join(item["label"] for item in slots)
-        reply = (
-            f"{session.customer_name} عزیز، برای بازدید و خرید {session.car_name} {session.car_model} "
-            f"وقت‌های خالی شنبه تا پنجشنبه ساعت ۹ تا ۱۷ این‌هاست: {labels}. "
-            "اگر اولین وقت مناسب است بگویید بله."
+    def _send_calendar_link(self, session: CallSession, text: str) -> dict[str, Any]:
+        session.phase = PHASE_AWAIT_CALENDAR
+        session.phone = session.phone or booking.DEFAULT_WHATSAPP
+        session.invite = booking.create_invite(
+            session.customer_name,
+            session.car_name,
+            session.car_model,
+            session.km,
+            session_id=session.session_id,
+            phone=session.phone,
+            db_path=self.db_path,
         )
-        return self._reply(session, text, reply)
-
-    def _on_slot(self, session: CallSession, text: str) -> dict[str, Any]:
-        lowered = text.replace("‌", "").replace(" ", "")
-        if any(word in text for word in NO_WORDS) and not any(word in text for word in YES_WORDS):
-            slots = booking.next_open_slots(limit=6, db_path=self.db_path)
-            session.offered_slots = slots[3:] or slots
-            if not session.offered_slots:
-                return self._reply(session, text, "وقت خالی دیگری نیست.")
-            labels = "، ".join(item["label"] for item in session.offered_slots[:3])
-            return self._reply(session, text, f"وقت‌های بعدی: {labels}. اگر موافقید بگویید بله.")
-        if any(word in text for word in YES_WORDS) or "بله" in lowered:
-            if not session.offered_slots:
-                return self._reply(session, text, "وقتی برای تأیید ندارم. تماس را از نو شروع کنید.")
-            return self._book(session, session.offered_slots[0], text)
-        picked = None
-        wanted = parse_clock(text)
-        for item in session.offered_slots:
-            if item["time"] in text or item["date"] in text or item["label"] in text:
-                picked = item
-                break
-            if wanted and item["time"] == wanted:
-                picked = item
-                break
-        if picked is None and wanted:
-            days = [item["date"] for item in session.offered_slots] or [booking.next_open_date().isoformat()]
-            for iso in days:
-                if wanted in booking.available_slots(iso, db_path=self.db_path):
-                    day = date.fromisoformat(iso)
-                    picked = {"date": iso, "time": wanted, "label": f"{format_jalali(day)} ساعت {wanted}"}
-                    break
-        if picked is None:
-            return self._reply(
-                session,
-                text,
-                "کدام ساعت را می‌خواهید؟ بگویید بله تا اولین وقت ثبت شود.",
-            )
-        return self._book(session, picked, text)
-
-    def _book(self, session: CallSession, slot: dict[str, str], text: str) -> dict[str, Any]:
-        try:
-            appt_id = booking.book_appointment(
-                session.customer_name,
-                session.car_name,
-                session.car_model,
-                session.km,
-                slot["date"],
-                slot["time"],
-                db_path=self.db_path,
-            )
-        except ValueError as extra:
-            return self._reply(session, text, str(extra))
-        session.appointment_id = appt_id
-        session.phase = PHASE_BOOKED
         session.live = False
-        km_label = "صفر" if session.km == 0 else f"{session.km} کیلومتر"
         reply = (
-            f"نوبت بازدید و خرید ثبت شد. {session.customer_name}، {session.car_name} {session.car_model} "
-            f"({km_label})، {slot['label']}."
+            f"{session.customer_name} عزیز، لینک تقویم نوبت‌های خالی را برایتان به واتساپ "
+            f"{session.phone} می‌فرستیم. روی لینک بزنید، وقت آزاد را از تقویم انتخاب کنید و نوبت ثبت شود."
         )
         return self._reply(session, text, reply)
 
@@ -254,4 +202,6 @@ class DialogueManager:
             "messages": list(session.messages),
             "live": session.live,
             "hours": booking.hours_panel(db_path=self.db_path),
+            "invite": session.invite,
+            "phone": session.phone,
         }

@@ -42,7 +42,7 @@ class NameDialogueTests(unittest.TestCase):
             manager.handle("s1", "پارس")
             manager.handle("s1", "۸۰۰۰۰")
             turn = manager.handle("s1", "علی رضای")
-            self.assertEqual(turn["phase"], "ask_slot")
+            self.assertEqual(turn["phase"], "await_calendar")
             self.assertEqual(turn["customer"]["name"], "علی رضایی")
             self.assertNotEqual(turn["reply"], ASK_NAME)
 

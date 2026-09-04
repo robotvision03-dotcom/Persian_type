@@ -6,11 +6,14 @@ from pathlib import Path
 from app.booking import (
     available_slots,
     book_appointment,
+    book_invite,
+    create_invite,
     init_db,
     is_office_open,
     list_appointments,
     next_open_slots,
     slot_times,
+    whatsapp_send_url,
 )
 from app.jalali import format_jalali, from_jalali, to_jalali
 
@@ -51,6 +54,20 @@ class BookingTests(unittest.TestCase):
             self.assertNotIn(slot["time"], available_slots(slot["date"], db_path))
             rows = list_appointments(db_path)
             self.assertEqual(rows[0]["customer_name"], "علی رضایی")
+
+    def test_whatsapp_invite_books_from_calendar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "book.sqlite"
+            init_db(db_path)
+            invite = create_invite("علی رضایی", "پژو", "206", 80000, db_path=db_path)
+            self.assertEqual(invite["phone"], "+989032901549")
+            slot = next_open_slots(1, db_path)[0]
+            booked = book_invite(invite["token"], slot["date"], slot["time"], db_path)
+            self.assertGreater(booked["id"], 0)
+            rows = list_appointments(db_path)
+            self.assertEqual(rows[0]["phone"], "+989032901549")
+            url = whatsapp_send_url("لینک", "+989032901549")
+            self.assertIn("wa.me/989032901549", url)
 
     def test_next_open_slots_labels(self):
         with tempfile.TemporaryDirectory() as tmp:

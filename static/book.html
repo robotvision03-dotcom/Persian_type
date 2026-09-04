@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>انتخاب وقت بازدید</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css?v=6" />
+  </head>
+  <body>
+    <div class="backdrop"></div>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">واتساپ · تقویم نوبت</p>
+        <h1>وقت خالی را انتخاب کنید</h1>
+        <p class="lede" id="book-lede">شنبه تا پنجشنبه ۹ تا ۱۷. جمعه تعطیل است.</p>
+      </div>
+    </header>
+    <main class="workspace dealership book-page">
+      <section class="panel">
+        <p id="book-status" class="hint">در حال بارگذاری وقت‌های خالی...</p>
+        <div class="cal-nav">
+          <button type="button" id="prev-m" class="ghost">ماه قبل</button>
+          <strong id="month-title">تقویم</strong>
+          <button type="button" id="next-m" class="ghost">ماه بعد</button>
+        </div>
+        <div class="weekdays" id="weekdays"></div>
+        <div class="weeks" id="weeks"></div>
+        <p id="day-label" class="hint">یک روز کاری را بزنید تا ساعت‌های خالی دیده شود.</p>
+        <div id="times" class="times"></div>
+        <div class="book-actions">
+          <button type="button" id="confirm-btn" class="start" disabled>ثبت این وقت</button>
+        </div>
+      </section>
+    </main>
+    <script src="/static/book.js?v=6"></script>
+  </body>
+</html>

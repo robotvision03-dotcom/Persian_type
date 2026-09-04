@@ -24,13 +24,12 @@ class DialogueTests(unittest.TestCase):
             self.assertEqual(manager.handle("s1", "پارس")["reply"], ASK_KM)
             self.assertEqual(manager.handle("s1", "۸۰۰۰۰")["reply"], ASK_NAME)
             after_name = manager.handle("s1", "علی رضایی")
-            self.assertEqual(after_name["phase"], "ask_slot")
-            self.assertIn("بله", after_name["reply"])
-            booked = manager.handle("s1", "بله")
-            self.assertEqual(booked["phase"], "booked")
-            self.assertIsNotNone(booked["appointment_id"])
-            self.assertEqual(booked["customer"]["name"], "علی رضایی")
-            self.assertEqual(booked["customer"]["car_name"], "پژو")
+            self.assertEqual(after_name["phase"], "await_calendar")
+            self.assertIn("واتساپ", after_name["reply"])
+            self.assertEqual(after_name["invite"]["phone"], "+989032901549")
+            self.assertTrue(after_name["invite"]["token"])
+            self.assertEqual(after_name["customer"]["name"], "علی رضایی")
+            self.assertEqual(after_name["customer"]["car_name"], "پژو")
 
     def test_peugeot_206_skips_model_and_asks_km(self):
         with tempfile.TemporaryDirectory() as tmp:
