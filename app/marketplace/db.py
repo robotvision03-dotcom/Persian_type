@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS marketplace_appointments (
     date TEXT NOT NULL,
     time TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'SCHEDULED',
+    source TEXT NOT NULL DEFAULT 'OFFICE',
+    notes TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS vehicles (
@@ -235,6 +237,11 @@ BUYER_EXTRA_COLUMNS = {
     "national_id": "TEXT NOT NULL DEFAULT ''",
 }
 
+APPOINTMENT_EXTRA_COLUMNS = {
+    "source": "TEXT NOT NULL DEFAULT 'OFFICE'",
+    "notes": "TEXT NOT NULL DEFAULT ''",
+}
+
 
 def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
     existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
@@ -247,6 +254,7 @@ def migrate_marketplace(conn: sqlite3.Connection) -> None:
     _ensure_columns(conn, "vehicles", VEHICLE_EXTRA_COLUMNS)
     _ensure_columns(conn, "inspections", INSPECTION_EXTRA_COLUMNS)
     _ensure_columns(conn, "buyer_profiles", BUYER_EXTRA_COLUMNS)
+    _ensure_columns(conn, "marketplace_appointments", APPOINTMENT_EXTRA_COLUMNS)
 
 
 def init_marketplace(db_path: Path | None = None) -> Path:

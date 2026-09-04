@@ -86,6 +86,15 @@ class AppointmentBody(BaseModel):
     time: str
     customer_name: str = ""
     customer_phone: str = ""
+    source: str = ""
+    notes: str = ""
+    brand: str = ""
+    model: str = ""
+    year: int | None = None
+    starting_price: int | None = None
+    ready_for_auction: bool = False
+    publish: bool = False
+    booking_appointment_id: int | None = None
 
 
 class InspectionBody(BaseModel):
@@ -325,7 +334,57 @@ def office_dash(request: Request, authorization: str | None = Header(default=Non
 @router.post("/office/appointments")
 def office_add_appt(body: AppointmentBody, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     user = staff_user(request, authorization)
-    return svc.create_appointment(body.date, body.time, body.customer_name, body.customer_phone, db(request))
+    return svc.create_appointment(
+        body.date,
+        body.time,
+        body.customer_name,
+        body.customer_phone,
+        db(request),
+        source=body.source,
+        notes=body.notes,
+        brand=body.brand,
+        model=body.model,
+        year=body.year,
+        starting_price=body.starting_price or 0,
+        ready_for_auction=body.ready_for_auction,
+        publish=body.publish,
+        booking_appointment_id=body.booking_appointment_id,
+    )
+
+
+@router.put("/office/appointments/{appointment_id}")
+def office_edit_appt(appointment_id: int, body: AppointmentBody, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    staff_user(request, authorization)
+    return svc.update_appointment(
+        appointment_id,
+        {
+            "date": body.date,
+            "time": body.time,
+            "customer_name": body.customer_name,
+            "customer_phone": body.customer_phone,
+            "notes": body.notes,
+            "source": body.source or None,
+        },
+        db(request),
+    )
+
+
+@router.delete("/office/appointments/{appointment_id}")
+def office_delete_appt(appointment_id: int, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    staff_user(request, authorization)
+    try:
+        return svc.delete_appointment(appointment_id, db(request))
+    except svc.MarketplaceError as extra:
+        raise wrap(extra) from extra
+
+
+@router.post("/office/appointments/import-booking/{booking_id}")
+def office_import_booking(booking_id: int, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    staff_user(request, authorization)
+    try:
+        return svc.import_booking_appointment(booking_id, db(request))
+    except svc.MarketplaceError as extra:
+        raise wrap(extra) from extra
 
 
 @router.post("/office/appointments/{appointment_id}/status")

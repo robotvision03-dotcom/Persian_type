@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from ..booking import list_appointments
+from ..booking import is_office_open, list_appointments, slot_times
 from .catalog import empty_report, inspection_catalog, normalize_report, public_report
 from .db import get_conn, init_marketplace
 from .engine import (
@@ -427,25 +427,98 @@ def list_notifications(user_id: int, db_path: Path | None = None) -> list[dict[s
     return [dict(row) for row in rows]
 
 
-def create_appointment(date: str, time: str, customer_name: str = "", customer_phone: str = "", db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
+def is_off_hours_slot(day: str, time: str) -> bool:
+    try:
+        parsed = date.fromisoformat(day)
+    except ValueError:
+        return True
+    if not is_office_open(parsed):
+        return True
+    hhmm = (time or "")[:5]
+    if hhmm in slot_times():
+        return False
+    return not ("09:00" <= hhmm < "17:00")
+
+
+def _appointment_payload(row: dict[str, Any]) -> dict[str, Any]:
+    extra = dict(row)
+    extra["off_hours"] = is_off_hours_slot(str(extra.get("date") or ""), str(extra.get("time") or ""))
+    return extra
+
+
+def create_appointment(
+    date: str,
+    time: str,
+    customer_name: str = "",
+    customer_phone: str = "",
+    db_path: Path | None = None,
+    now: datetime | str | None = None,
+    source: str = "",
+    notes: str = "",
+    brand: str = "",
+    model: str = "",
+    year: int | None = None,
+    starting_price: int = 0,
+    ready_for_auction: bool = False,
+    publish: bool = False,
+    booking_appointment_id: int | None = None,
+) -> dict[str, Any]:
     stamp = now_iso(now)
+    off = is_off_hours_slot(date, time)
+    used_source = source or ("OFF_HOURS" if off else "OFFICE")
+    if publish:
+        ready_for_auction = True
+    vehicle_status = "READY_FOR_BIDDING" if ready_for_auction else "APPOINTMENT_SCHEDULED"
     with get_conn(db_path) as conn:
         cur = conn.execute(
             """
-            INSERT INTO marketplace_appointments (customer_name, customer_phone, date, time, status, created_at)
-            VALUES (?, ?, ?, ?, 'SCHEDULED', ?)
+            INSERT INTO marketplace_appointments (
+                booking_appointment_id, customer_name, customer_phone, date, time, status, source, notes, created_at
+            ) VALUES (?, ?, ?, ?, ?, 'SCHEDULED', ?, ?, ?)
             """,
-            (customer_name, customer_phone, date, time, stamp),
+            (booking_appointment_id, customer_name, customer_phone, date, time, used_source, notes, stamp),
         )
         appt_id = int(cur.lastrowid)
-        conn.execute(
+        cur = conn.execute(
             """
-            INSERT INTO vehicles (appointment_id, status, customer_name, customer_phone, created_at, updated_at)
-            VALUES (?, 'APPOINTMENT_SCHEDULED', ?, ?, ?, ?)
+            INSERT INTO vehicles (
+                appointment_id, status, brand, model, year, starting_price, customer_name, customer_phone,
+                inspection_completed, office_approved, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (appt_id, customer_name, customer_phone, stamp, stamp),
+            (
+                appt_id,
+                vehicle_status,
+                brand,
+                model,
+                year,
+                int(starting_price or 0),
+                customer_name,
+                customer_phone,
+                1 if ready_for_auction else 0,
+                1 if ready_for_auction else 0,
+                stamp,
+                stamp,
+            ),
         )
+        vehicle_id = int(cur.lastrowid)
+        if ready_for_auction:
+            report = json.dumps(empty_report(), ensure_ascii=False)
+            conn.execute(
+                """
+                INSERT INTO inspections (vehicle_id, status, summary, report_json, finalized_at, created_at)
+                VALUES (?, 'COMPLETED', 'ورود خارج از نوبت / ثبت دفتر', ?, ?, ?)
+                """,
+                (vehicle_id, report, stamp, stamp),
+            )
         bump_live(conn)
+    if publish:
+        auction = publish_vehicle(vehicle_id, db_path=db_path, now=now)
+        return {
+            "appointment": get_appointment(appt_id, db_path),
+            "vehicle": get_vehicle(vehicle_id, db_path),
+            "auction": auction,
+        }
     return get_appointment(appt_id, db_path)
 
 
@@ -454,7 +527,82 @@ def get_appointment(appointment_id: int, db_path: Path | None = None) -> dict[st
         row = conn.execute("SELECT * FROM marketplace_appointments WHERE id = ?", (appointment_id,)).fetchone()
     if row is None:
         raise MarketplaceError("نوبت پیدا نشد.", 404)
-    return dict(row)
+    return _appointment_payload(dict(row))
+
+
+def update_appointment(appointment_id: int, fields: dict[str, Any], db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
+    current = get_appointment(appointment_id, db_path)
+    allowed = {"date", "time", "customer_name", "customer_phone", "notes", "source"}
+    updates = {key: fields[key] for key in allowed if key in fields and fields[key] is not None}
+    if not updates:
+        return current
+    day = str(updates.get("date") or current["date"])
+    time = str(updates.get("time") or current["time"])
+    if "source" not in updates and is_off_hours_slot(day, time):
+        updates["source"] = "OFF_HOURS"
+    sets = ", ".join(f"{key} = ?" for key in updates)
+    with get_conn(db_path) as conn:
+        conn.execute(f"UPDATE marketplace_appointments SET {sets} WHERE id = ?", (*updates.values(), appointment_id))
+        vehicle_updates = {key: updates[key] for key in ("customer_name", "customer_phone") if key in updates}
+        if vehicle_updates:
+            parts = ", ".join(f"{key} = ?" for key in vehicle_updates)
+            conn.execute(
+                f"UPDATE vehicles SET {parts}, updated_at = ? WHERE appointment_id = ?",
+                (*vehicle_updates.values(), now_iso(now), appointment_id),
+            )
+        bump_live(conn)
+    return get_appointment(appointment_id, db_path)
+
+
+def _purge_vehicle(conn: Any, vehicle_id: int) -> None:
+    auctions = conn.execute("SELECT id FROM auctions WHERE vehicle_id = ?", (vehicle_id,)).fetchall()
+    for row in auctions:
+        auction_id = row["id"]
+        conn.execute("DELETE FROM bids WHERE auction_id = ?", (auction_id,))
+        conn.execute("DELETE FROM auto_bid_limits WHERE auction_id = ?", (auction_id,))
+        conn.execute("DELETE FROM auction_participants WHERE auction_id = ?", (auction_id,))
+        conn.execute("DELETE FROM auction_winners WHERE auction_id = ?", (auction_id,))
+        conn.execute("DELETE FROM auctions WHERE id = ?", (auction_id,))
+    conn.execute("DELETE FROM inspections WHERE vehicle_id = ?", (vehicle_id,))
+    conn.execute("DELETE FROM vehicles WHERE id = ?", (vehicle_id,))
+
+
+def delete_appointment(appointment_id: int, db_path: Path | None = None) -> dict[str, Any]:
+    get_appointment(appointment_id, db_path)
+    with get_conn(db_path) as conn:
+        vehicle = conn.execute("SELECT * FROM vehicles WHERE appointment_id = ?", (appointment_id,)).fetchone()
+        if vehicle and vehicle["status"] in {"BIDDING_ACTIVE", "SOLD"}:
+            raise MarketplaceError("اول مزایده فعال را لغو کنید. خودروی فروخته‌شده حذف نمی‌شود.", 409)
+        if vehicle:
+            _purge_vehicle(conn, vehicle["id"])
+        conn.execute("DELETE FROM marketplace_appointments WHERE id = ?", (appointment_id,))
+        bump_live(conn)
+    return {"ok": True, "deleted": appointment_id}
+
+
+def import_booking_appointment(booking_id: int, db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
+    with get_conn(db_path) as conn:
+        existing = conn.execute(
+            "SELECT * FROM marketplace_appointments WHERE booking_appointment_id = ?",
+            (booking_id,),
+        ).fetchone()
+    if existing:
+        return _appointment_payload(dict(existing))
+    booking = next((item for item in list_appointments(db_path) if int(item.get("id") or 0) == int(booking_id)), None)
+    if booking is None:
+        raise MarketplaceError("نوبت تماس پیدا نشد.", 404)
+    return create_appointment(
+        booking.get("date") or "",
+        booking.get("time") or "",
+        booking.get("customer_name") or "",
+        booking.get("phone") or "",
+        db_path=db_path,
+        now=now,
+        source="BOOKING",
+        brand=booking.get("car_name") or "",
+        model=booking.get("car_model") or "",
+        booking_appointment_id=booking_id,
+    )
 
 
 def set_appointment_status(appointment_id: int, status: str, db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
@@ -466,22 +614,47 @@ def set_appointment_status(appointment_id: int, status: str, db_path: Path | Non
         "CANCELLED": ("CANCELLED", "CANCELLED"),
     }
     appt_status, vehicle_status = mapping.get(status, (status, None))
+    auction_ids: list[int] = []
     with get_conn(db_path) as conn:
         conn.execute("UPDATE marketplace_appointments SET status = ? WHERE id = ?", (appt_status, appointment_id))
-        if vehicle_status:
+        if vehicle_status and appt_status != "CANCELLED":
             conn.execute(
                 "UPDATE vehicles SET status = ?, updated_at = ? WHERE appointment_id = ?",
                 (vehicle_status, now_iso(now), appointment_id),
             )
+        if appt_status == "CANCELLED":
+            rows = conn.execute(
+                """
+                SELECT auctions.id FROM auctions
+                JOIN vehicles ON vehicles.id = auctions.vehicle_id
+                WHERE vehicles.appointment_id = ? AND auctions.status = 'ACTIVE'
+                """,
+                (appointment_id,),
+            ).fetchall()
+            auction_ids = [int(row["id"]) for row in rows]
         bump_live(conn)
+    for auction_id in auction_ids:
+        cancel_auction(auction_id, db_path=db_path, now=now)
+    if appt_status == "CANCELLED":
+        with get_conn(db_path) as conn:
+            conn.execute(
+                """
+                UPDATE vehicles SET status = 'CANCELLED', published_for_bidding = 0, updated_at = ?
+                WHERE appointment_id = ? AND status != 'SOLD'
+                """,
+                (now_iso(now), appointment_id),
+            )
     return get_appointment(appointment_id, db_path)
 
 
 def office_appointments(db_path: Path | None = None) -> list[dict[str, Any]]:
     with get_conn(db_path) as conn:
         rows = conn.execute("SELECT * FROM marketplace_appointments ORDER BY date, time").fetchall()
-    out = [dict(row) for row in rows]
+    out = [_appointment_payload(dict(row)) for row in rows]
+    imported = {row.get("booking_appointment_id") for row in out if row.get("booking_appointment_id")}
     for item in list_appointments(db_path):
+        if item.get("id") in imported:
+            continue
         out.append(
             {
                 "id": None,
@@ -491,7 +664,10 @@ def office_appointments(db_path: Path | None = None) -> list[dict[str, Any]]:
                 "date": item.get("date"),
                 "time": item.get("time"),
                 "status": "SCHEDULED",
-                "source": "booking",
+                "source": "BOOKING",
+                "off_hours": is_off_hours_slot(str(item.get("date") or ""), str(item.get("time") or "")),
+                "brand": item.get("car_name") or "",
+                "model": item.get("car_model") or "",
             }
         )
     out.sort(key=lambda row: (str(row.get("date") or ""), str(row.get("time") or "")))

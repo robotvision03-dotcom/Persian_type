@@ -223,11 +223,18 @@ async function refresh(options) {
   const vehicles = dash.vehicles || [];
   $("appts").innerHTML = `<table class="appts"><thead><tr><th>ساعت</th><th>وضعیت</th><th>مشتری</th><th></th></tr></thead><tbody>${(dash.appointments || [])
     .map((row) => {
+      const off = row.off_hours ? `<span class="badge-off">خارج از وقت</span>` : "";
       if (!row.id) {
-        return `<tr><td>${row.date} ${row.time}</td><td>${row.status}</td><td>${row.customer_name || ""}</td><td>نوبت تماس</td></tr>`;
+        return `<tr><td>${escapeHtml(row.date)} ${escapeHtml(row.time)} ${off}</td><td>نوبت تماس</td><td>${escapeHtml(row.customer_name || "")}</td>
+          <td><button class="ghost import-booking" type="button" data-id="${row.booking_appointment_id}">ثبت در دفتر</button></td></tr>`;
       }
-      return `<tr><td>${row.date} ${row.time}</td><td>${row.status}</td><td>${row.customer_name || ""}</td>
-        <td><button class="ghost arrive" data-id="${row.id}">ورود مشتری</button></td></tr>`;
+      return `<tr><td>${escapeHtml(row.date)} ${escapeHtml(row.time)} ${off}</td><td>${escapeHtml(row.status)} ${row.source === "OFF_HOURS" || row.source === "WALK_IN" ? "· فوری" : ""}</td><td>${escapeHtml(row.customer_name || "")}<br /><small>${escapeHtml(row.customer_phone || "")}</small></td>
+        <td class="appt-actions">
+          <button class="ghost arrive" type="button" data-id="${row.id}">ورود مشتری</button>
+          <button class="ghost edit-appt" type="button" data-id="${row.id}" data-date="${escapeHtml(row.date)}" data-time="${escapeHtml(row.time)}" data-name="${escapeHtml(row.customer_name || "")}" data-phone="${escapeHtml(row.customer_phone || "")}">عوض کردن</button>
+          <button class="ghost cancel-appt" type="button" data-id="${row.id}">لغو نوبت</button>
+          <button class="ghost delete-appt" type="button" data-id="${row.id}">حذف</button>
+        </td></tr>`;
     })
     .join("")}</tbody></table>`;
   $("vehicles").innerHTML = vehicles
@@ -259,6 +266,8 @@ async function refresh(options) {
     )
     .join("")}</tbody></table>`;
   startLive();
+  if (!$("appt-form").appointment_id.value) fillNow($("appt-form"));
+  fillNow($("express-form"));
   } finally {
     refreshing = false;
   }
@@ -284,18 +293,63 @@ $("logout-btn").addEventListener("click", () => {
   refresh();
 });
 
+function fillNow(form) {
+  if (!form) return;
+  const now = new Date();
+  const iso = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString();
+  if (!form.date.value) form.date.value = iso.slice(0, 10);
+  if (!form.time.value) form.time.value = iso.slice(11, 16);
+}
+
+function resetApptForm() {
+  const form = $("appt-form");
+  form.reset();
+  form.appointment_id.value = "";
+  $("cancel-edit").classList.add("hidden");
+  form.querySelector("button[type=submit]").textContent = "ثبت نوبت";
+  fillNow(form);
+}
+
+$("cancel-edit").addEventListener("click", () => resetApptForm());
+
 $("appt-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(event.target);
-  await api("/office/appointments", {
-    method: "POST",
-    body: JSON.stringify({
-      date: form.get("date"),
-      time: form.get("time"),
-      customer_name: form.get("customer_name"),
-      customer_phone: form.get("customer_phone"),
-    }),
-  });
+  const payload = {
+    date: form.get("date"),
+    time: form.get("time"),
+    customer_name: form.get("customer_name"),
+    customer_phone: form.get("customer_phone"),
+  };
+  const editId = form.get("appointment_id");
+  if (editId) {
+    await api(`/office/appointments/${editId}`, { method: "PUT", body: JSON.stringify(payload) });
+  } else {
+    await api("/office/appointments", { method: "POST", body: JSON.stringify(payload) });
+  }
+  resetApptForm();
+  refresh();
+});
+
+$("express-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const mode = event.submitter && event.submitter.getAttribute("data-mode");
+  const form = new FormData(event.target);
+  const payload = {
+    date: form.get("date"),
+    time: form.get("time"),
+    customer_name: form.get("customer_name"),
+    customer_phone: form.get("customer_phone"),
+    brand: form.get("brand") || "",
+    model: form.get("model") || "",
+    source: "WALK_IN",
+    ready_for_auction: true,
+    publish: mode === "publish",
+  };
+  if (form.get("year")) payload.year = Number(form.get("year"));
+  if (form.get("starting_price")) payload.starting_price = Number(form.get("starting_price"));
+  await api("/office/appointments", { method: "POST", body: JSON.stringify(payload) });
+  event.target.reset();
   refresh();
 });
 
@@ -366,6 +420,24 @@ document.addEventListener("click", async (event) => {
   if (!btn || btn.classList.contains("finalize-report")) return;
   const id = btn.getAttribute("data-id");
   try {
+    if (btn.classList.contains("import-booking")) await api(`/office/appointments/import-booking/${id}`, { method: "POST" });
+    if (btn.classList.contains("edit-appt")) {
+      const form = $("appt-form");
+      form.appointment_id.value = id;
+      form.date.value = btn.getAttribute("data-date") || "";
+      form.time.value = (btn.getAttribute("data-time") || "").slice(0, 5);
+      form.customer_name.value = btn.getAttribute("data-name") || "";
+      form.customer_phone.value = btn.getAttribute("data-phone") || "";
+      form.querySelector("button[type=submit]").textContent = "ذخیره نوبت";
+      $("cancel-edit").classList.remove("hidden");
+      form.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (btn.classList.contains("cancel-appt")) await api(`/office/appointments/${id}/status`, { method: "POST", body: JSON.stringify({ status: "CANCELLED" }) });
+    if (btn.classList.contains("delete-appt")) {
+      if (!confirm("این نوبت حذف شود؟")) return;
+      await api(`/office/appointments/${id}`, { method: "DELETE" });
+    }
     if (btn.classList.contains("arrive")) await api(`/office/appointments/${id}/status`, { method: "POST", body: JSON.stringify({ status: "ARRIVED" }) });
     if (btn.classList.contains("inspect")) await api(`/office/vehicles/${id}/inspect`, { method: "POST" });
     if (btn.classList.contains("approve")) await api(`/office/vehicles/${id}/approve`, { method: "POST" });

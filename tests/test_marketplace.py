@@ -105,6 +105,52 @@ class AuthTests(unittest.TestCase):
             self.assertFalse(svc.can_bid(frozen))
 
 
+class AppointmentAdminTests(unittest.TestCase):
+    def test_edit_cancel_and_delete_appointment(self):
+        tmp, path = _db()
+        with tmp:
+            appt = svc.create_appointment("2026-09-05", "10:30", "علی رضایی", "09120000000", db_path=path)
+            updated = svc.update_appointment(appt["id"], {"date": "2026-09-06", "time": "11:15", "customer_name": "مریم"}, db_path=path)
+            self.assertEqual(updated["date"], "2026-09-06")
+            self.assertEqual(updated["time"], "11:15")
+            self.assertEqual(updated["customer_name"], "مریم")
+            buyers = svc.buyer_appointments(path)
+            self.assertTrue(any(row["time"] == "11:15" for row in buyers))
+            cancelled = svc.set_appointment_status(appt["id"], "CANCELLED", db_path=path)
+            self.assertEqual(cancelled["status"], "CANCELLED")
+            self.assertFalse(any(row.get("time") == "11:15" and row.get("status") != "CANCELLED" for row in svc.buyer_appointments(path)))
+            svc.delete_appointment(appt["id"], db_path=path)
+            with self.assertRaises(svc.MarketplaceError):
+                svc.get_appointment(appt["id"], path)
+
+    def test_off_hours_walk_in_can_publish(self):
+        tmp, path = _db()
+        with tmp:
+            when = datetime(2026, 9, 4, 21, 30, 0)
+            created = svc.create_appointment(
+                "2026-09-04",
+                "21:30",
+                "ورود فوری",
+                "09120000001",
+                db_path=path,
+                now=when,
+                source="WALK_IN",
+                brand="پژو",
+                model="207",
+                starting_price=2_000_000,
+                publish=True,
+            )
+            self.assertIn("auction", created)
+            appt = created["appointment"]
+            self.assertTrue(appt["off_hours"])
+            self.assertEqual(appt["source"], "WALK_IN")
+            self.assertEqual(created["vehicle"]["status"], "BIDDING_ACTIVE")
+            _, buyer = _buyer(path, "walk@ex.com")
+            visible = svc.buyer_visible_auctions(buyer, path, now=when)
+            self.assertEqual(len(visible), 1)
+            self.assertEqual(visible[0]["brand"], "پژو")
+
+
 class AppointmentPrivacyTests(unittest.TestCase):
     def test_buyer_sees_time_only(self):
         tmp, path = _db()

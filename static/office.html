@@ -6,8 +6,8 @@
     <title>دفتر مرکز</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=15" />
-    <link rel="stylesheet" href="/static/portal.css?v=15" />
+    <link rel="stylesheet" href="/static/styles.css?v=16" />
+    <link rel="stylesheet" href="/static/portal.css?v=16" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -39,11 +39,27 @@
             <button class="ghost" id="logout-btn" type="button">خروج</button>
           </div>
           <form id="appt-form" class="actions">
+            <input type="hidden" name="appointment_id" value="" />
             <input name="date" type="date" required />
             <input name="time" type="time" required />
             <input name="customer_name" placeholder="نام مشتری" />
             <input name="customer_phone" placeholder="تلفن" />
             <button class="start" type="submit">ثبت نوبت</button>
+            <button class="ghost hidden" id="cancel-edit" type="button">انصراف ویرایش</button>
+          </form>
+          <p class="hint">نوبت دفتر هر ساعتی ثبت می‌شود، حتی جمعه و خارج از ۹ تا ۱۷.</p>
+          <form id="express-form" class="vehicle-form">
+            <h4>ورود خارج از نوبت / مزایده فوری</h4>
+            <input name="date" type="date" required />
+            <input name="time" type="time" required />
+            <input name="customer_name" placeholder="نام مشتری" />
+            <input name="customer_phone" placeholder="تلفن" />
+            <input name="brand" placeholder="برند" />
+            <input name="model" placeholder="مدل" />
+            <input name="year" placeholder="سال" />
+            <input name="starting_price" placeholder="شروع قیمت" />
+            <button class="ghost" type="submit" data-mode="ready">ثبت و آماده مزایده</button>
+            <button class="start" type="submit" data-mode="publish">ثبت و انتشار فوری</button>
           </form>
           <div id="appts"></div>
         </section>
@@ -57,6 +73,6 @@
         </section>
       </div>
     </main>
-    <script src="/static/office.js?v=15"></script>
+    <script src="/static/office.js?v=16"></script>
   </body>
 </html>
