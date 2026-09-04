@@ -566,8 +566,12 @@ class DailyLedgerTests(unittest.TestCase):
     def test_office_calendar_is_jalali(self):
         cal = svc.office_month_calendar(1405, 6)
         self.assertEqual(cal["month_name"], "شهریور")
-        self.assertTrue(cal["times"])
-        self.assertIn("09:00", cal["times"])
+        self.assertIn("09", cal["hours"])
+        self.assertEqual(cal["minutes"], ["00", "15", "30", "45"])
+        self.assertIn("09:15", cal["times"])
+        labeled = next(cell for week in cal["weeks"] for cell in week if cell)
+        self.assertIn("jalali", labeled)
+        self.assertNotIn("/", labeled["jalali"])
         self.assertTrue(any(cell and cell.get("friday") for week in cal["weeks"] for cell in week))
 
 

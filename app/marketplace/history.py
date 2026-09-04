@@ -55,12 +55,22 @@ def ledger_day_of(value: datetime | str | None) -> str:
     return date.today().isoformat()
 
 
+def office_hours() -> list[str]:
+    return [f"{hour:02d}" for hour in range(OFFICE_HOUR_START, OFFICE_HOUR_END + 1)]
+
+
+def office_minutes() -> list[str]:
+    return ["00", "15", "30", "45"]
+
+
 def office_time_slots() -> list[str]:
     slots: list[str] = []
-    for hour in range(OFFICE_HOUR_START, OFFICE_HOUR_END + 1):
-        slots.append(f"{hour:02d}:00")
-        if hour < OFFICE_HOUR_END:
-            slots.append(f"{hour:02d}:30")
+    last_hour = f"{OFFICE_HOUR_END:02d}"
+    for hour in office_hours():
+        for minute in office_minutes():
+            if hour == last_hour and minute != "00":
+                continue
+            slots.append(f"{hour}:{minute}")
     return slots
 
 
@@ -75,10 +85,12 @@ def office_month_calendar(jy: int | None = None, jm: int | None = None) -> dict[
             if day is None:
                 row.append(None)
                 continue
+            _jy, _jm, jd = to_jalali(day)
             row.append(
                 {
                     "date": day.isoformat(),
-                    "jalali_day": to_jalali(day)[2],
+                    "jalali": format_jalali(day),
+                    "jalali_day": jd,
                     "today": day == today,
                     "friday": day.weekday() == 4,
                     "customer_open": is_office_open(day),
@@ -91,6 +103,8 @@ def office_month_calendar(jy: int | None = None, jm: int | None = None) -> dict[
         "month": int(jm),
         "month_name": MONTHS_FA[int(jm) - 1],
         "weeks": weeks,
+        "hours": office_hours(),
+        "minutes": office_minutes(),
         "times": office_time_slots(),
         "today": today.isoformat(),
         "today_jalali": format_jalali(today),

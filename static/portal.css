@@ -214,10 +214,44 @@
   background: rgba(18, 42, 33, 0.35);
 }
 
-.picker .times {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  max-height: 220px;
-  overflow: auto;
+.picker .weeks {
+  margin-bottom: 12px;
+}
+
+.picker .day.friday:not(.sel) {
+  color: #e7c36a;
+}
+
+.time-selects {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 8px 0;
+}
+
+.time-selects label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.time-selects select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(244, 239, 226, 0.08);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 1rem;
+}
+
+.pick-label {
+  margin: 8px 0 0;
+  color: var(--gold);
+  font-weight: 700;
 }
 
 .notice-win {

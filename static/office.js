@@ -22,6 +22,15 @@ function todayIso() {
   return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
 
+function faDigits(value) {
+  return String(value ?? "").replace(/[0-9]/g, (digit) => "۰۱۲۳۴۵۶۷۸۹"[Number(digit)]);
+}
+
+function splitTime(value) {
+  const [hour, minute] = String(value || "10:00").split(":");
+  return { hour: hour || "10", minute: ["00", "15", "30", "45"].includes(minute) ? minute : "00" };
+}
+
 async function api(path, options) {
   const response = await fetch(path, { ...(options || {}), headers: { ...headers(), ...((options && options.headers) || {}) } });
   const data = await response.json().catch(() => ({}));
@@ -125,36 +134,48 @@ async function loadHistory(day, page) {
     : "";
 }
 
+function optionList(values, selected) {
+  return values
+    .map((value) => `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${faDigits(value)}</option>`)
+    .join("");
+}
+
 async function bindPicker(name) {
   const root = document.querySelector(`[data-picker="${name}"]`);
   if (!root) return;
   const form = root.closest("form");
-  const state = pickers[name] || { year: null, month: null, date: form.date.value || todayIso(), time: form.time.value || "" };
+  const state = pickers[name] || { year: null, month: null, date: form.date.value || todayIso(), time: form.time.value || "10:00", jalali: "" };
   pickers[name] = state;
   const query = state.year ? `?year=${state.year}&month=${state.month}` : "";
   const data = await api("/office/calendar" + query);
   state.year = data.year;
   state.month = data.month;
-  root.querySelector(".pick-month").textContent = `${data.month_name} ${data.year}`;
+  const clock = splitTime(state.time);
+  state.time = `${clock.hour}:${clock.minute}`;
+  root.querySelector(".pick-month").textContent = `${data.month_name} ${faDigits(data.year)}`;
   const weeks = root.querySelector(".weeks");
   weeks.innerHTML = data.weeks
     .flat()
     .map((cell) => {
       if (!cell) return `<button type="button" class="day" disabled></button>`;
-      const cls = ["day", cell.today ? "today" : "", cell.date === state.date ? "sel" : "", cell.friday ? "closed" : ""]
+      if (cell.date === state.date) state.jalali = cell.jalali;
+      const cls = ["day", cell.today ? "today" : "", cell.date === state.date ? "sel" : "", cell.friday ? "friday" : ""]
         .filter(Boolean)
         .join(" ");
-      return `<button type="button" class="${cls}" data-date="${cell.date}">${cell.jalali_day}</button>`;
+      return `<button type="button" class="${cls}" data-date="${cell.date}" data-jalali="${escapeHtml(cell.jalali)}">${faDigits(cell.jalali_day)}</button>`;
     })
     .join("");
-  const times = root.querySelector(".times");
-  times.innerHTML = (data.times || [])
-    .map((time) => `<button type="button" class="time-chip ${time === state.time ? "pick" : ""}" data-time="${time}">${time}</button>`)
-    .join("");
+  const hourBox = root.querySelector(".pick-hour");
+  const minuteBox = root.querySelector(".pick-minute");
+  if (hourBox) hourBox.innerHTML = optionList(data.hours || [], clock.hour);
+  if (minuteBox) minuteBox.innerHTML = optionList(data.minutes || [], clock.minute);
   form.date.value = state.date || "";
   form.time.value = state.time || "";
   const label = root.querySelector(".pick-label");
-  if (label) label.textContent = state.date && state.time ? `انتخاب شما: ${data.today_jalali && state.date === data.today ? "امروز" : state.date} ساعت ${state.time}` : "یک روز و یک ساعت را انتخاب کنید.";
+  if (label) {
+    const dayText = state.jalali || (state.date === data.today ? data.today_jalali : "");
+    label.textContent = dayText && state.time ? `نوبت انتخاب‌شده: ${dayText}، ساعت ${faDigits(state.time)}` : "یک روز شمسی و ساعت را انتخاب کنید.";
+  }
 }
 
 async function loadBids(auctionId, page) {
@@ -442,7 +463,8 @@ async function fillNow(form, pickerName) {
   if (!form.date.value) form.date.value = iso.slice(0, 10);
   if (!form.time.value) {
     const hh = iso.slice(11, 13);
-    const mm = Number(iso.slice(14, 16)) < 30 ? "00" : "30";
+    const raw = Number(iso.slice(14, 16));
+    const mm = raw < 15 ? "00" : raw < 30 ? "15" : raw < 45 ? "30" : "45";
     form.time.value = `${hh}:${mm}`;
   }
   if (pickerName) {
@@ -463,6 +485,19 @@ async function resetApptForm() {
 }
 
 $("cancel-edit").addEventListener("click", () => resetApptForm());
+
+document.addEventListener("change", async (event) => {
+  const select = event.target.closest(".pick-hour, .pick-minute");
+  if (!select) return;
+  const root = select.closest(".picker");
+  const name = root.getAttribute("data-picker");
+  const hour = root.querySelector(".pick-hour").value;
+  const minute = root.querySelector(".pick-minute").value;
+  pickers[name] = pickers[name] || {};
+  pickers[name].time = `${hour}:${minute}`;
+  root.closest("form").time.value = pickers[name].time;
+  await bindPicker(name);
+});
 
 $("appt-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -563,17 +598,8 @@ document.addEventListener("click", async (event) => {
     const name = root.getAttribute("data-picker");
     pickers[name] = pickers[name] || {};
     pickers[name].date = pickDay.getAttribute("data-date");
+    pickers[name].jalali = pickDay.getAttribute("data-jalali") || "";
     root.closest("form").date.value = pickers[name].date;
-    await bindPicker(name);
-    return;
-  }
-  const pickTime = event.target.closest(".picker .time-chip[data-time]");
-  if (pickTime) {
-    const root = pickTime.closest(".picker");
-    const name = root.getAttribute("data-picker");
-    pickers[name] = pickers[name] || {};
-    pickers[name].time = pickTime.getAttribute("data-time");
-    root.closest("form").time.value = pickers[name].time;
     await bindPicker(name);
     return;
   }
