@@ -61,11 +61,23 @@ class AuthTests(unittest.TestCase):
     def test_register_login_and_invalid(self):
         tmp, path = _db()
         with tmp:
-            buyer = svc.register_buyer("a@ex.com", "Secret123", db_path=path)
+            buyer = svc.register_buyer(
+                "a@ex.com",
+                "Secret123",
+                contact_person="علی رضایی",
+                phone="09121234567",
+                national_id="0012345678",
+                require_identity=True,
+                db_path=path,
+            )
             self.assertEqual(buyer["status"], "PENDING")
+            self.assertEqual(buyer["contact_person"], "علی رضایی")
+            self.assertEqual(buyer["phone"], "09121234567")
+            self.assertEqual(buyer["national_id"], "0012345678")
             self.assertEqual(buyer["verification_status"], "UNVERIFIED")
             session = svc.login("a@ex.com", "Secret123", db_path=path)
             self.assertTrue(session["token"])
+            self.assertEqual(session["user"]["buyer"]["contact_person"], "علی رضایی")
             with self.assertRaises(svc.MarketplaceError):
                 svc.login("a@ex.com", "wrong", db_path=path)
             svc.logout(session["token"], db_path=path)
@@ -440,11 +452,28 @@ class MarketplaceApiTests(unittest.TestCase):
         root = Path(tmp.name)
         reset_state(root, db_path=root / "book.sqlite")
         client = TestClient(app)
-        client.post("/auth/register", json={"email": "a@ex.com", "password": "Secret123", "business_name": "A"})
+        missing = client.post("/auth/register", json={"email": "a@ex.com", "password": "Secret123", "business_name": "A"})
+        self.assertEqual(missing.status_code, 400)
+        client.post(
+            "/auth/register",
+            json={
+                "email": "a@ex.com",
+                "password": "Secret123",
+                "full_name": "علی رضایی",
+                "phone": "09121234567",
+                "national_id": "0012345678",
+                "business_name": "A",
+            },
+        )
         denied = client.post("/auth/login", json={"email": "a@ex.com", "password": "nope"})
         self.assertEqual(denied.status_code, 401)
         login = client.post("/auth/login", json={"email": "a@ex.com", "password": "Secret123"}).json()
         token = login["token"]
+        me = client.get("/buyers/me", headers={"Authorization": "Bearer " + token}).json()
+        self.assertEqual(me["buyer"]["contact_person"], "علی رضایی")
+        self.assertEqual(me["buyer"]["phone"], "09121234567")
+        self.assertEqual(me["buyer"]["national_id"], "0012345678")
+        self.assertTrue(me["buyer"]["id"])
         office = client.post("/auth/login", json={"email": "office@center.local", "password": "Office123!"}).json()
         office_h = {"Authorization": "Bearer " + office["token"]}
         buyer_h = {"Authorization": "Bearer " + token}

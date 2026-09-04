@@ -113,12 +113,39 @@ def user_by_email(email: str, db_path: Path | None = None) -> dict[str, Any] | N
         return _row(conn.execute("SELECT * FROM users WHERE email = ?", (email.lower().strip(),)).fetchone())
 
 
+def _digits(value: Any) -> str:
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def normalize_phone(phone: str) -> str:
+    digits = _digits(phone)
+    if digits.startswith("98") and len(digits) >= 12:
+        digits = "0" + digits[2:]
+    return digits
+
+
+def normalize_buyer_identity(name: str = "", phone: str = "", national_id: str = "", required: bool = False) -> tuple[str, str, str]:
+    clean_name = str(name or "").strip()
+    clean_phone = normalize_phone(phone)
+    clean_id = _digits(national_id)
+    if required:
+        if len(clean_name) < 2:
+            raise MarketplaceError("نام خریدار را وارد کنید.", 400)
+        if len(clean_phone) < 10:
+            raise MarketplaceError("شماره تلفن معتبر نیست.", 400)
+        if len(clean_id) != 10:
+            raise MarketplaceError("کد ملی / شماره شناسایی باید ۱۰ رقم باشد.", 400)
+    return clean_name, clean_phone, clean_id
+
+
 def register_buyer(
     email: str,
     password: str,
     business_name: str = "",
     contact_person: str = "",
     phone: str = "",
+    national_id: str = "",
+    require_identity: bool = False,
     db_path: Path | None = None,
     now: datetime | str | None = None,
 ) -> dict[str, Any]:
@@ -129,6 +156,7 @@ def register_buyer(
         raise MarketplaceError("رمز عبور حداقل ۶ کاراکتر باشد.", 400)
     if user_by_email(clean, db_path):
         raise MarketplaceError("این ایمیل قبلاً ثبت شده است.", 409)
+    contact_person, phone, national_id = normalize_buyer_identity(contact_person, phone, national_id, required=require_identity)
     stamp = now_iso(now)
     with get_conn(db_path) as conn:
         cur = conn.execute(
@@ -139,10 +167,10 @@ def register_buyer(
         cur = conn.execute(
             """
             INSERT INTO buyer_profiles
-                (user_id, business_name, contact_person, phone, email, status, verification_status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 'PENDING', 'UNVERIFIED', ?, ?)
+                (user_id, business_name, contact_person, phone, national_id, email, status, verification_status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'PENDING', 'UNVERIFIED', ?, ?)
             """,
-            (user_id, business_name, contact_person, phone, clean, stamp, stamp),
+            (user_id, business_name, contact_person, phone, national_id, clean, stamp, stamp),
         )
         buyer_id = int(cur.lastrowid)
         conn.execute("INSERT INTO buyer_preferences (buyer_id) VALUES (?)", (buyer_id,))
@@ -257,6 +285,7 @@ def update_buyer_profile(buyer_id: int, fields: dict[str, Any], db_path: Path | 
         "business_name",
         "contact_person",
         "phone",
+        "national_id",
         "email",
         "city",
         "address",
@@ -264,6 +293,20 @@ def update_buyer_profile(buyer_id: int, fields: dict[str, Any], db_path: Path | 
         "tax_id",
     }
     updates = {key: fields[key] for key in allowed if key in fields}
+    if "contact_person" in updates or "phone" in updates or "national_id" in updates:
+        current = get_buyer_profile(buyer_id, db_path) or {}
+        name, phone, national_id = normalize_buyer_identity(
+            str(updates.get("contact_person", current.get("contact_person") or "")),
+            str(updates.get("phone", current.get("phone") or "")),
+            str(updates.get("national_id", current.get("national_id") or "")),
+            required=False,
+        )
+        if "contact_person" in updates:
+            updates["contact_person"] = name
+        if "phone" in updates:
+            updates["phone"] = phone
+        if "national_id" in updates:
+            updates["national_id"] = national_id
     if not updates:
         profile = get_buyer_profile(buyer_id, db_path)
         if profile is None:

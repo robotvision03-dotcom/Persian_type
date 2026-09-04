@@ -6,8 +6,8 @@
     <title>پورتال خریدار</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=14" />
-    <link rel="stylesheet" href="/static/portal.css?v=14" />
+    <link rel="stylesheet" href="/static/styles.css?v=15" />
+    <link rel="stylesheet" href="/static/portal.css?v=15" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -26,9 +26,12 @@
       <section id="auth-box" class="panel">
         <div class="panel-head"><h2>ورود / ثبت‌نام</h2></div>
         <form id="login-form" class="stack">
-          <input name="email" type="email" placeholder="ایمیل" required />
-          <input name="password" type="password" placeholder="رمز عبور" required />
-          <input name="business_name" type="text" placeholder="نام کسب‌وکار (برای ثبت‌نام)" />
+          <input name="full_name" type="text" placeholder="نام و نام خانوادگی (ثبت‌نام)" autocomplete="name" />
+          <input name="national_id" type="text" inputmode="numeric" placeholder="کد ملی / شماره شناسایی (ثبت‌نام)" />
+          <input name="phone" type="tel" placeholder="شماره تلفن (ثبت‌نام)" autocomplete="tel" />
+          <input name="email" type="email" placeholder="ایمیل" required autocomplete="username" />
+          <input name="password" type="password" placeholder="رمز عبور" required autocomplete="current-password" />
+          <input name="business_name" type="text" placeholder="نام کسب‌وکار (اختیاری)" />
           <div class="actions">
             <button class="start" type="submit">ورود</button>
             <button class="ghost" id="register-btn" type="button">ثبت‌نام</button>
@@ -43,6 +46,7 @@
             <button class="ghost" id="logout-btn" type="button">خروج</button>
           </div>
           <p id="account-line" class="hint"></p>
+          <div id="profile-card" class="spec-readout"></div>
         </section>
         <section class="panel">
           <h2>مزایده‌های فعال</h2>
@@ -58,6 +62,6 @@
         </section>
       </div>
     </main>
-    <script src="/static/buyer.js?v=14"></script>
+    <script src="/static/buyer.js?v=15"></script>
   </body>
 </html>

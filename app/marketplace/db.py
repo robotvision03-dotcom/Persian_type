@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS buyer_profiles (
     business_name TEXT NOT NULL DEFAULT '',
     contact_person TEXT NOT NULL DEFAULT '',
     phone TEXT NOT NULL DEFAULT '',
+    national_id TEXT NOT NULL DEFAULT '',
     email TEXT NOT NULL DEFAULT '',
     city TEXT NOT NULL DEFAULT '',
     address TEXT NOT NULL DEFAULT '',
@@ -230,6 +231,10 @@ INSPECTION_EXTRA_COLUMNS = {
     "report_json": "TEXT NOT NULL DEFAULT '{}'",
 }
 
+BUYER_EXTRA_COLUMNS = {
+    "national_id": "TEXT NOT NULL DEFAULT ''",
+}
+
 
 def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
     existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
@@ -241,6 +246,7 @@ def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str
 def migrate_marketplace(conn: sqlite3.Connection) -> None:
     _ensure_columns(conn, "vehicles", VEHICLE_EXTRA_COLUMNS)
     _ensure_columns(conn, "inspections", INSPECTION_EXTRA_COLUMNS)
+    _ensure_columns(conn, "buyer_profiles", BUYER_EXTRA_COLUMNS)
 
 
 def init_marketplace(db_path: Path | None = None) -> Path:

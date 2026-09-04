@@ -211,7 +211,7 @@ async function refresh(options) {
     });
     $("buyers").innerHTML = `<table class="appts"><thead><tr><th>خریدار</th><th>وضعیت</th><th></th></tr></thead><tbody>${(dash.buyers || [])
       .map(
-        (row) => `<tr><td>${escapeHtml(row.business_name || row.email)} (#${row.id})</td><td>${escapeHtml(row.status)} / ${escapeHtml(row.verification_status)}</td>
+        (row) => `<tr><td>${escapeHtml(row.contact_person || row.business_name || row.email)} · ${escapeHtml(row.phone || "—")} · کد ${escapeHtml(row.national_id || "—")} (#${row.id})</td><td>${escapeHtml(row.status)} / ${escapeHtml(row.verification_status)}</td>
       <td><button class="start activate" data-id="${row.id}">فعال و تأیید</button>
       <button class="ghost suspend" data-id="${row.id}">تعلیق</button></td></tr>`
       )
@@ -253,7 +253,7 @@ async function refresh(options) {
     .join("");
   $("buyers").innerHTML = `<table class="appts"><thead><tr><th>خریدار</th><th>وضعیت</th><th></th></tr></thead><tbody>${(dash.buyers || [])
     .map(
-      (row) => `<tr><td>${escapeHtml(row.business_name || row.email)} (#${row.id})</td><td>${escapeHtml(row.status)} / ${escapeHtml(row.verification_status)}</td>
+      (row) => `<tr><td>${escapeHtml(row.contact_person || row.business_name || row.email)} · ${escapeHtml(row.phone || "—")} · کد ${escapeHtml(row.national_id || "—")} (#${row.id})</td><td>${escapeHtml(row.status)} / ${escapeHtml(row.verification_status)}</td>
       <td><button class="start activate" data-id="${row.id}">فعال و تأیید</button>
       <button class="ghost suspend" data-id="${row.id}">تعلیق</button></td></tr>`
     )

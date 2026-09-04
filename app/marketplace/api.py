@@ -46,9 +46,11 @@ def staff_user(request: Request, authorization: str | None = None) -> dict[str, 
 class RegisterBody(BaseModel):
     email: str
     password: str
-    business_name: str = ""
+    full_name: str = ""
     contact_person: str = ""
     phone: str = ""
+    national_id: str = ""
+    business_name: str = ""
 
 
 class LoginBody(BaseModel):
@@ -133,7 +135,18 @@ def wrap(exc: svc.MarketplaceError) -> HTTPException:
 @router.post("/auth/register")
 def register(body: RegisterBody, request: Request) -> dict[str, Any]:
     try:
-        buyer = svc.register_buyer(body.email, body.password, body.business_name, body.contact_person, body.phone, db(request))
+        name = body.full_name or body.contact_person
+        name, phone, national_id = svc.normalize_buyer_identity(name, body.phone, body.national_id, required=True)
+        buyer = svc.register_buyer(
+            body.email,
+            body.password,
+            body.business_name,
+            name,
+            phone,
+            national_id,
+            require_identity=True,
+            db_path=db(request),
+        )
     except svc.MarketplaceError as extra:
         raise wrap(extra) from extra
     return {"ok": True, "buyer": buyer}

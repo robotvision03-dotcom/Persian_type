@@ -133,9 +133,21 @@ async function refresh(options) {
     const me = await api("/buyers/me");
     $("auth-box").classList.add("hidden");
     $("app-box").classList.remove("hidden");
-    $("who").textContent = me.user.email;
     const buyer = me.buyer || {};
-    $("account-line").textContent = `${buyer.business_name || buyer.contact_person || me.user.email} — وضعیت ${buyer.status || ""} / تأیید ${buyer.verification_status || ""}`;
+    const buyerName = buyer.contact_person || buyer.business_name || me.user.email;
+    $("who").textContent = buyerName;
+    $("account-line").textContent = `${buyerName} وارد شده است — وضعیت ${buyer.status || ""} / تأیید ${buyer.verification_status || ""}`;
+    const profile = $("profile-card");
+    if (profile) {
+      profile.innerHTML = [
+        specLine("نام خریدار", buyer.contact_person),
+        specLine("شناسه خریدار", buyer.id ? "#" + buyer.id : ""),
+        specLine("کد ملی", buyer.national_id),
+        specLine("تلفن", buyer.phone),
+        specLine("ایمیل", buyer.email || me.user.email),
+        specLine("کسب‌وکار", buyer.business_name),
+      ].join("");
+    }
     const auctions = await api("/auctions");
     const box = $("auctions");
     if (!auctions.length) {
@@ -208,6 +220,9 @@ $("register-btn").addEventListener("click", async () => {
       body: JSON.stringify({
         email: form.get("email"),
         password: form.get("password"),
+        full_name: form.get("full_name") || "",
+        national_id: form.get("national_id") || "",
+        phone: form.get("phone") || "",
         business_name: form.get("business_name") || "",
       }),
     });
