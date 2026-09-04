@@ -6,8 +6,8 @@
     <title>پورتال خریدار</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=27" />
-    <link rel="stylesheet" href="/static/portal.css?v=27" />
+    <link rel="stylesheet" href="/static/styles.css?v=28" />
+    <link rel="stylesheet" href="/static/portal.css?v=28" />
   </head>
   <body class="portal-page">
     <div class="backdrop"></div>
@@ -27,10 +27,12 @@
         <form id="login-form" class="stack">
           <input name="email" type="email" placeholder="ایمیل" required autocomplete="username" />
           <input name="password" type="password" placeholder="رمز عبور" required autocomplete="current-password" />
-          <input name="full_name" type="text" placeholder="نام و نام خانوادگی (ثبت‌نام)" autocomplete="name" />
-          <input name="national_id" type="text" inputmode="numeric" placeholder="کد ملی / شماره شناسایی (ثبت‌نام)" />
-          <input name="phone" type="tel" placeholder="شماره تلفن (ثبت‌نام)" autocomplete="tel" />
-          <input name="business_name" type="text" placeholder="نام کسب‌وکار (اختیاری)" />
+          <div id="register-extra" class="hidden">
+            <input name="full_name" type="text" placeholder="نام و نام خانوادگی" autocomplete="name" />
+            <input name="national_id" type="text" inputmode="numeric" placeholder="کد ملی / شماره شناسایی" />
+            <input name="phone" type="tel" placeholder="شماره تلفن" autocomplete="tel" />
+            <input name="business_name" type="text" placeholder="نام کسب‌وکار (اختیاری)" />
+          </div>
           <div class="actions">
             <button class="start" type="submit">ورود</button>
             <button class="ghost" id="register-btn" type="button">ثبت‌نام</button>
@@ -62,6 +64,7 @@
           <div class="day-nav" id="hist-pages"></div>
         </section>
         <section class="panel pane" data-pane="account">
+          <p id="profile-summary" class="hint"></p>
           <div class="actions">
             <button class="ghost" id="open-profile" type="button">ویرایش پروفایل</button>
           </div>
@@ -86,6 +89,6 @@
         </section>
       </div>
     </main>
-    <script src="/static/buyer.js?v=27"></script>
+    <script src="/static/buyer.js?v=28"></script>
   </body>
 </html>

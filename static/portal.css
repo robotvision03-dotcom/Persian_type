@@ -80,6 +80,11 @@
   max-width: 420px;
 }
 
+#register-extra {
+  display: grid;
+  gap: 10px;
+}
+
 .portal input,
 .portal select {
   border: 1px solid var(--line);

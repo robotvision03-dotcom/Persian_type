@@ -8,6 +8,8 @@ let liveRevision = 0;
 let liveTimer = null;
 let refreshing = false;
 let lastBuyers = [];
+let lastVehicles = [];
+let pendingInspectId = null;
 let historyDay = "";
 let historyPage = 1;
 let historyPrev = "";
@@ -136,14 +138,23 @@ function openForm(id, hideIds) {
 }
 
 function closeSheets() {
-  ["appt-sheet", "express-sheet"].forEach((id) => $(id) && $(id).classList.add("hidden"));
-  $("appt-form") && $("appt-form").classList.remove("hidden");
-  $("express-form") && $("express-form").classList.remove("hidden");
+  ["appt-sheet", "express-sheet", "buyer-sheet"].forEach((id) => $(id) && $(id).classList.add("hidden"));
 }
 
 function openSheet(id) {
   closeSheets();
   if ($(id)) $(id).classList.remove("hidden");
+}
+
+function openInspect(vehicleId) {
+  const box = document.querySelector(`[data-inspect="${vehicleId}"]`);
+  if (!box) return;
+  const car = lastVehicles.find((row) => String(row.id) === String(vehicleId));
+  if (car && !box.dataset.ready) {
+    box.innerHTML = `${renderSpecs(car)}${renderInspection(car)}`;
+    box.dataset.ready = "1";
+  }
+  box.classList.remove("hidden");
 }
 
 async function loadNotes(winners) {
@@ -335,7 +346,7 @@ function renderInspection(car) {
           return `<div class="inspect-group"><h5>${escapeHtml(group.label)}</h5><div class="inspect-grid">${rows}</div></div>`;
         })
         .join("");
-      return `<details class="inspect-acc" ${category.id === "body" ? "open" : ""}>
+      return `<details class="inspect-acc">
         <summary><strong>${escapeHtml(category.label)}</strong><span class="score">${category.item_count} مورد</span></summary>
         <div class="inspect-tools">
           <button type="button" class="ghost mark-ok" data-vehicle="${car.id}" data-cat="${category.id}">اعمال پیش‌فرض سالم</button>
@@ -492,13 +503,15 @@ async function refresh(options) {
         </div>
         ${auction ? `<div class="bid-box" data-bids="${auction.id}"></div>` : ""}
         <button class="ghost toggle-inspect" type="button" data-open="${car.id}">کارشناسی و مشخصات</button>
-        <div class="inspect-wrap hidden" data-inspect="${car.id}">
-          ${renderSpecs(car)}
-          ${renderInspection(car)}
-        </div>
+        <div class="inspect-wrap hidden" data-inspect="${car.id}"></div>
       </article>`;
     })
     .join("");
+  lastVehicles = vehicles;
+  if (pendingInspectId) {
+    openInspect(pendingInspectId);
+    pendingInspectId = null;
+  }
   lastBuyers = dash.buyers || [];
   $("buyers").innerHTML = `<table class="appts"><thead><tr><th>خریدار</th><th>وضعیت</th><th></th></tr></thead><tbody>${(dash.buyers || [])
     .map(
@@ -513,8 +526,6 @@ async function refresh(options) {
   startLive();
   await loadNotes(lastWinners);
   if (!live) {
-    if (!$("appt-form").appointment_id.value) await fillNow($("appt-form"), "appt");
-    await fillNow($("express-form"), "express");
     await loadHistory(historyDay, historyPage);
   }
   } finally {
@@ -626,12 +637,12 @@ $("buyer-edit-form").addEventListener("submit", async (event) => {
       address: form.get("address") || "",
     }),
   });
-  event.target.classList.add("hidden");
+  closeSheets();
   refresh();
 });
 
 $("buyer-edit-cancel").addEventListener("click", () => {
-  $("buyer-edit-form").classList.add("hidden");
+  closeSheets();
 });
 
 $("express-form").addEventListener("submit", async (event) => {
@@ -720,8 +731,11 @@ document.addEventListener("click", async (event) => {
   }
   const inspectToggle = event.target.closest(".toggle-inspect");
   if (inspectToggle) {
-    const box = document.querySelector(`[data-inspect="${inspectToggle.getAttribute("data-open")}"]`);
-    if (box) box.classList.toggle("hidden");
+    const id = inspectToggle.getAttribute("data-open");
+    const box = document.querySelector(`[data-inspect="${id}"]`);
+    if (!box) return;
+    if (box.classList.contains("hidden")) openInspect(id);
+    else box.classList.add("hidden");
     return;
   }
   const toggle = event.target.closest(".pick-toggle");
@@ -895,6 +909,7 @@ document.addEventListener("click", async (event) => {
     if (btn.classList.contains("arrive")) await api(`/office/appointments/${id}/status`, { method: "POST", body: JSON.stringify({ status: "ARRIVED" }) });
     if (btn.classList.contains("inspect")) {
       await api(`/office/vehicles/${id}/inspect`, { method: "POST" });
+      pendingInspectId = id;
       showPane("cars");
     }
     if (btn.classList.contains("approve")) await api(`/office/vehicles/${id}/approve`, { method: "POST" });
@@ -905,7 +920,6 @@ document.addEventListener("click", async (event) => {
     if (btn.classList.contains("edit-buyer")) {
       const buyer = lastBuyers.find((row) => String(row.id) === String(id)) || {};
       const form = $("buyer-edit-form");
-      form.classList.remove("hidden");
       form.buyer_id.value = id;
       form.contact_person.value = buyer.contact_person || "";
       form.national_id.value = buyer.national_id || "";
@@ -915,6 +929,7 @@ document.addEventListener("click", async (event) => {
       form.city.value = buyer.city || "";
       form.address.value = buyer.address || "";
       showPane("buyers");
+      openSheet("buyer-sheet");
       return;
     }
     if (btn.classList.contains("activate")) await api(`/office/buyers/${id}/status`, { method: "POST", body: JSON.stringify({ status: "ACTIVE", verification_status: "VERIFIED" }) });

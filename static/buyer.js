@@ -64,8 +64,8 @@ function renderInspection(item) {
         <p class="hint">${escapeHtml(category.summary || "")}</p>${groups}</details>`;
     })
     .join("");
-  return `<details class="inspect-acc" open>
-      <summary><strong>مشخصات کامل و گزارش کارشناسی</strong></summary>
+  return `<details class="inspect-acc">
+      <summary><strong>مشخصات و کارشناسی</strong></summary>
       <div class="spec-readout">
         ${specLine("نوع بدنه", item.body_type)}
         ${specLine("وضعیت رنگ", item.paint_status)}
@@ -240,6 +240,11 @@ async function refresh(options) {
     const buyerName = buyer.contact_person || buyer.business_name || me.user.email;
     $("who").textContent = buyerName;
     $("account-line").textContent = `${buyerName} وارد شده است — وضعیت ${buyer.status || ""} / تأیید ${buyer.verification_status || ""}`;
+    if ($("profile-summary")) {
+      $("profile-summary").textContent = [buyer.contact_person || buyer.business_name, buyer.phone, buyer.national_id ? "کد " + buyer.national_id : ""]
+        .filter(Boolean)
+        .join(" · ") || "پروفایل هنوز کامل نیست.";
+    }
     const profileForm = $("profile-form");
     if (profileForm && !(options && options.live && profileForm.contains(document.activeElement))) {
       profileForm.contact_person.value = buyer.contact_person || "";
@@ -318,6 +323,12 @@ $("login-form").addEventListener("submit", async (event) => {
 });
 
 $("register-btn").addEventListener("click", async () => {
+  const extra = $("register-extra");
+  if (extra && extra.classList.contains("hidden")) {
+    extra.classList.remove("hidden");
+    $("auth-msg").textContent = "نام، کد ملی و تلفن را وارد کنید، بعد دوباره ثبت‌نام را بزنید.";
+    return;
+  }
   const form = new FormData($("login-form"));
   try {
     await api("/auth/register", {
