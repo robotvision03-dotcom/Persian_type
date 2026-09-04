@@ -19,30 +19,24 @@
         <p class="eyebrow">Persian Type</p>
         <h1>تایپ گفتاری فارسی</h1>
         <p class="lede">
-          یک مدل را با دکمه رادیویی انتخاب کنید، دکمه شروع را بزنید و صحبت کنید.
-          بعد مدل دیگری را انتخاب کنید تا ببینید کدام بهتر تایپ می‌کند.
+          گفتار با مدل شنوا کوچیک CTC به متن تبدیل می‌شود. بعد همان متن برای آزمایش سرعت و دقت به
+          <strong>qwen2.5:14b</strong>
+          و
+          <strong>llama3.2:3b</strong>
+          در Ollama فرستاده می‌شود.
         </p>
         <div class="meta-row">
+          <span id="asr-chip" class="path-chip">شنوا کوچیک CTC</span>
           <span id="models-path" class="path-chip">...</span>
-          <button type="button" id="refresh-btn" class="ghost">بازخوانی مدل‌ها</button>
         </div>
       </header>
 
-      <section class="panel" aria-labelledby="models-title">
+      <section class="panel">
         <div class="panel-head">
-          <h2 id="models-title">مدل‌ها</h2>
-          <p id="status-line" class="status">در حال خواندن مدل‌ها...</p>
+          <h2>وضعیت</h2>
+          <p id="status-line" class="status">در حال آماده‌سازی...</p>
         </div>
-        <form id="model-form" class="model-grid"></form>
-        <p id="empty-models" class="empty hidden">
-          هیچ مدلی پیدا نشد. پوشه‌های مدل را در
-          <code>models</code>
-          بگذارید یا مسیر
-          <code>C:\Users\omid\Documents\appointment\models</code>
-          را در
-          <code>config.json</code>
-          تنظیم کنید.
-        </p>
+        <p id="asr-note" class="hint"></p>
       </section>
 
       <section class="controls-row">
@@ -52,7 +46,7 @@
           فایل صوتی
           <input id="file-input" type="file" accept="audio/*,.wav,.flac,.ogg" />
         </label>
-        <button type="button" id="rerun-btn" class="ghost" disabled>رونویسی دوباره</button>
+        <button type="button" id="llm-btn" class="ghost" disabled>آزمایش LLM</button>
         <div class="meter" aria-hidden="true">
           <span id="level-bar"></span>
         </div>
@@ -63,6 +57,7 @@
           <div class="panel-head">
             <h2>متن تایپ‌شده</h2>
             <div class="actions">
+              <span id="asr-time" class="hint"></span>
               <button type="button" id="copy-btn" class="ghost">کپی</button>
               <button type="button" id="clear-btn" class="ghost">پاک کردن</button>
             </div>
@@ -78,10 +73,12 @@
 
         <article class="panel compare-panel">
           <div class="panel-head">
-            <h2>مقایسه مدل‌ها</h2>
-            <p class="hint">آخرین نتیجه هر مدل برای همان صدا</p>
+            <h2>آزمایش LLM</h2>
+            <p class="hint">مقایسه سرعت و دقت qwen2.5:14b و llama3.2:3b</p>
           </div>
-          <div id="compare-list" class="compare-list"></div>
+          <div id="compare-list" class="compare-list">
+            <p class="hint">بعد از رونویسی، دکمه آزمایش LLM را بزنید.</p>
+          </div>
         </article>
       </section>
     </main>

@@ -243,3 +243,18 @@ def scan_models(models_dir: str | Path | None = None) -> tuple[Path, list[ModelI
             )
         )
     return root, found
+
+
+PREFERRED_ASR_ID = "shenava-koochik-ctc"
+
+
+def find_shenava_ctc(models: list[ModelInfo]) -> ModelInfo | None:
+    """Return only the Shenava Koochik CTC (sherpa-onnx) model."""
+    by_id = {item.id: item for item in models}
+    preferred = by_id.get(PREFERRED_ASR_ID)
+    if preferred and preferred.usable and preferred.engine == "sherpa_ctc":
+        return preferred
+    for item in models:
+        if item.usable and item.engine == "sherpa_ctc":
+            return item
+    return None

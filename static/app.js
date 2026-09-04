@@ -1,15 +1,15 @@
 const $ = (id) => document.getElementById(id);
 
-const modelForm = $("model-form");
-const emptyModels = $("empty-models");
 const statusLine = $("status-line");
 const modelsPath = $("models-path");
+const asrChip = $("asr-chip");
+const asrNote = $("asr-note");
+const asrTime = $("asr-time");
 const startBtn = $("start-btn");
 const stopBtn = $("stop-btn");
-const rerunBtn = $("rerun-btn");
+const llmBtn = $("llm-btn");
 const copyBtn = $("copy-btn");
 const clearBtn = $("clear-btn");
-const refreshBtn = $("refresh-btn");
 const fileInput = $("file-input");
 const transcript = $("transcript");
 const partialLine = $("partial-line");
@@ -19,7 +19,6 @@ const overlayText = $("overlay-text");
 const levelBar = $("level-bar");
 
 let state = null;
-let selecting = false;
 let socket = null;
 let mediaStream = null;
 let audioContext = null;
@@ -32,67 +31,6 @@ function setOverlay(visible, message) {
   if (message) overlayText.textContent = message;
 }
 
-function engineLabel(engine) {
-  const labels = {
-    vosk: "Vosk",
-    whisper_ct2: "Whisper CT2",
-    sherpa_ctc: "Shenava CTC",
-    sherpa_rnnt: "Shenava RNNT",
-    nemo: "NeMo",
-    piper_tts: "Piper TTS",
-    unknown: "ناشناخته",
-  };
-  return labels[engine] || engine;
-}
-
-function renderModels() {
-  const models = state?.models || [];
-  emptyModels.classList.toggle("hidden", models.length > 0);
-  modelForm.innerHTML = "";
-  for (const model of models) {
-    const label = document.createElement("label");
-    label.className = "model-card" + (model.usable ? "" : " disabled");
-    label.innerHTML = `
-      <input type="radio" name="model" value="${model.id}" ${
-        model.active ? "checked" : ""
-      } ${model.usable ? "" : "disabled"} />
-      <span class="face">
-        <span class="radio-dot"></span>
-        <div class="model-title">${model.name_fa}</div>
-        <div class="model-note">${model.note}</div>
-        <span class="engine-tag">${engineLabel(model.engine)}</span>
-      </span>
-    `;
-    const input = label.querySelector("input");
-    input.addEventListener("change", () => {
-      if (input.checked) selectModel(model.id);
-    });
-    modelForm.appendChild(label);
-  }
-  renderCompare();
-}
-
-function renderCompare() {
-  const models = (state?.models || []).filter((model) => model.usable);
-  if (!models.length) {
-    compareList.innerHTML = `<p class="hint">بعد از شروع و توقف، نتیجه هر مدل اینجا می‌آید.</p>`;
-    return;
-  }
-  compareList.innerHTML = models
-    .map((model) => {
-      const text = model.last_text || "هنوز رونویسی نشده";
-      const time = model.last_ms != null ? `${model.last_ms} میلی‌ثانیه` : "";
-      return `
-        <article class="compare-card">
-          <h3>${model.name_fa}</h3>
-          <p>${escapeHtml(text)}</p>
-          <div class="time">${time}</div>
-        </article>
-      `;
-    })
-    .join("");
-}
-
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -101,13 +39,49 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function renderLlm() {
+  const llm = state?.llm;
+  if (!llm?.results?.length) {
+    compareList.innerHTML = `<p class="hint">بعد از رونویسی، دکمه آزمایش LLM را بزنید.</p>`;
+    return;
+  }
+  compareList.innerHTML = llm.results
+    .map((item) => {
+      const badges = [];
+      if (llm.fastest === item.model) badges.push("سریع‌تر");
+      if (llm.most_persian === item.model) badges.push("فارسی‌تر");
+      const badgeHtml = badges
+        .map((label) => `<span class="engine-tag">${escapeHtml(label)}</span>`)
+        .join(" ");
+      const speed = item.ms ? `${item.ms} میلی‌ثانیه` : "";
+      const tps = item.tokens_per_sec ? `${item.tokens_per_sec} توکن/ثانیه` : "";
+      const ratio =
+        item.persian_ratio != null ? `نسبت فارسی ${(item.persian_ratio * 100).toFixed(0)}٪` : "";
+      return `
+        <article class="compare-card">
+          <h3>${escapeHtml(item.model)} ${badgeHtml}</h3>
+          <p>${escapeHtml(item.text || "بدون پاسخ")}</p>
+          <div class="time">${[speed, tps, ratio].filter(Boolean).join(" · ")}</div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
 function applyState(next) {
   state = next;
   modelsPath.textContent = next.models_dir || "";
   statusLine.textContent = next.status || "";
-  rerunBtn.disabled = !next.has_last_audio || !next.active_id;
-  startBtn.disabled = !next.active_id || recording;
-  renderModels();
+  if (next.asr) {
+    asrChip.textContent = next.asr.name_fa || "شنوا کوچیک CTC";
+    asrNote.textContent = next.asr.note || "";
+  }
+  if (next.last_asr_ms != null) {
+    asrTime.textContent = `${next.last_asr_ms} میلی‌ثانیه`;
+  }
+  startBtn.disabled = !next.ready || recording;
+  llmBtn.disabled = !(transcript.value || "").trim();
+  renderLlm();
 }
 
 async function fetchState() {
@@ -116,50 +90,12 @@ async function fetchState() {
   applyState(await response.json());
 }
 
-async function selectModel(modelId) {
-  if (selecting) return;
-  selecting = true;
-  if (recording) await stopRecording();
-  setOverlay(true, "در حال اجرای مدل جدید...");
-  try {
-    const response = await fetch("/api/select", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model_id: modelId }),
-    });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.detail || "بارگذاری مدل ناموفق بود");
-    applyState(payload);
-    if (payload.has_last_audio) {
-      overlayText.textContent = "در حال رونویسی همان صدا با مدل جدید...";
-      await rerunLast();
-    }
-  } catch (error) {
-    statusLine.textContent = error.message;
-    try {
-      await fetchState();
-    } catch (_refreshError) {
-      startBtn.disabled = true;
-    }
-    alert(error.message);
-  } finally {
-    selecting = false;
-    setOverlay(false);
-  }
-}
-
-async function rerunLast() {
-  const response = await fetch("/api/transcribe-last", { method: "POST" });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.detail || "رونویسی ناموفق بود");
-  applyTranscriptResult(payload);
-}
-
 function applyTranscriptResult(payload) {
   if (payload.text) {
     transcript.value = joinText(transcript.value, payload.text);
   }
   if (payload.state) applyState(payload.state);
+  llmBtn.disabled = !(transcript.value || "").trim();
   partialLine.textContent = "";
 }
 
@@ -204,8 +140,8 @@ function updateLevel(samples) {
 }
 
 async function startRecording() {
-  if (!state?.active_id) {
-    alert("ابتدا یک مدل را انتخاب کنید.");
+  if (!state?.ready) {
+    alert("مدل شنوا هنوز آماده نیست.");
     return;
   }
   mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -277,7 +213,7 @@ function teardownAudio() {
 async function stopRecording() {
   recording = false;
   stopBtn.disabled = true;
-  startBtn.disabled = !state?.active_id;
+  startBtn.disabled = !state?.ready;
   if (socket && socket.readyState === WebSocket.OPEN) {
     socket.send("stop");
     await new Promise((resolve) => {
@@ -310,20 +246,27 @@ stopBtn.addEventListener("click", () => {
   stopRecording();
 });
 
-rerunBtn.addEventListener("click", async () => {
-  setOverlay(true, "در حال رونویسی دوباره...");
+llmBtn.addEventListener("click", async () => {
+  const text = (transcript.value || "").trim();
+  if (!text) {
+    alert("ابتدا صحبت کنید یا متن را بنویسید.");
+    return;
+  }
+  setOverlay(true, "در حال آزمایش qwen2.5:14b و llama3.2:3b ...");
   try {
-    await rerunLast();
+    const response = await fetch("/api/llm-test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "آزمایش LLM ناموفق بود");
+    if (payload.state) applyState(payload.state);
   } catch (error) {
     alert(error.message);
   } finally {
     setOverlay(false);
   }
-});
-
-refreshBtn.addEventListener("click", async () => {
-  const response = await fetch("/api/refresh", { method: "POST" });
-  applyState(await response.json());
 });
 
 copyBtn.addEventListener("click", async () => {
@@ -334,14 +277,15 @@ copyBtn.addEventListener("click", async () => {
 clearBtn.addEventListener("click", () => {
   transcript.value = "";
   partialLine.textContent = "";
+  llmBtn.disabled = true;
 });
 
 fileInput.addEventListener("change", async () => {
   const file = fileInput.files?.[0];
   fileInput.value = "";
   if (!file) return;
-  if (!state?.active_id) {
-    alert("ابتدا یک مدل را انتخاب کنید.");
+  if (!state?.ready) {
+    alert("مدل شنوا هنوز آماده نیست.");
     return;
   }
   setOverlay(true, "در حال رونویسی فایل...");
@@ -359,6 +303,27 @@ fileInput.addEventListener("change", async () => {
   }
 });
 
-fetchState().catch((error) => {
-  statusLine.textContent = error.message;
+transcript.addEventListener("input", () => {
+  llmBtn.disabled = !(transcript.value || "").trim();
 });
+
+async function boot() {
+  setOverlay(true, "در حال بارگذاری شنوا کوچیک CTC...");
+  try {
+    const response = await fetch("/api/boot", { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "بارگذاری مدل ناموفق بود");
+    applyState(payload);
+  } catch (error) {
+    statusLine.textContent = error.message;
+    try {
+      await fetchState();
+    } catch (_refreshError) {
+      startBtn.disabled = true;
+    }
+  } finally {
+    setOverlay(false);
+  }
+}
+
+boot();

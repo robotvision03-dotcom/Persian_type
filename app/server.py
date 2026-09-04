@@ -1,4 +1,4 @@
-"""FastAPI server for Persian dictation model comparison."""
+"""FastAPI server for Shenava CTC dictation and Ollama LLM tests."""
 
 from __future__ import annotations
 
@@ -14,14 +14,15 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .audio import TARGET_RATE, concat, int16_bytes_to_float32, load_audio_file
-from .discovery import ModelInfo, find_models_dir, scan_models
+from .discovery import ModelInfo, find_models_dir, find_shenava_ctc, scan_models
 from .engines import Engine, TranscriptionError, load_engine
+from .ollama import OllamaError, configured_models, test_models
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 
-class SelectBody(BaseModel):
-    model_id: str = Field(..., min_length=1)
+class LlmTestBody(BaseModel):
+    text: str = Field(..., min_length=1)
 
 
 class AppState:
@@ -29,63 +30,60 @@ class AppState:
         self.lock = threading.RLock()
         self.models_dir = find_models_dir(models_dir)
         self.models: list[ModelInfo] = []
-        self.active_id: str | None = None
+        self.asr: ModelInfo | None = None
         self.engine: Engine | None = None
         self.loading = False
         self.status = "آماده"
         self.last_audio: np.ndarray | None = None
-        self.results: dict[str, dict[str, Any]] = {}
+        self.last_transcript = ""
+        self.last_asr_ms: int | None = None
+        self.llm_results: dict[str, Any] | None = None
         self.refresh()
 
     def refresh(self) -> None:
         self.models_dir, self.models = scan_models(self.models_dir)
-
-    def model_map(self) -> dict[str, ModelInfo]:
-        return {item.id: item for item in self.models}
-
-    def public_models(self) -> list[dict[str, Any]]:
-        payload = []
-        for item in self.models:
-            payload.append(
-                {
-                    "id": item.id,
-                    "name": item.name,
-                    "name_fa": item.name_fa,
-                    "engine": item.engine,
-                    "usable": item.usable,
-                    "note": item.note,
-                    "active": item.id == self.active_id,
-                    "last_text": (self.results.get(item.id) or {}).get("text", ""),
-                    "last_ms": (self.results.get(item.id) or {}).get("ms"),
-                }
-            )
-        return payload
+        self.asr = find_shenava_ctc(self.models)
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
+            asr = self.asr
             return {
                 "models_dir": str(self.models_dir),
-                "models": self.public_models(),
-                "active_id": self.active_id,
+                "asr": None
+                if asr is None
+                else {
+                    "id": asr.id,
+                    "name": asr.name,
+                    "name_fa": asr.name_fa,
+                    "engine": asr.engine,
+                    "note": asr.note,
+                },
+                "ready": self.engine is not None,
                 "loading": self.loading,
                 "status": self.status,
                 "has_last_audio": self.last_audio is not None and self.last_audio.size > 0,
+                "last_transcript": self.last_transcript,
+                "last_asr_ms": self.last_asr_ms,
+                "llm": self.llm_results,
+                "ollama_models": configured_models(),
             }
 
-    def select(self, model_id: str) -> dict[str, Any]:
+    def boot(self) -> dict[str, Any]:
         with self.lock:
-            info = self.model_map().get(model_id)
+            self.refresh()
+            info = self.asr
             if info is None:
-                raise HTTPException(status_code=404, detail="مدل پیدا نشد.")
-            if not info.usable:
-                raise HTTPException(status_code=400, detail=info.note)
-            if self.active_id == model_id and self.engine is not None:
-                self.status = f"مدل فعال: {info.name_fa}"
+                self.status = "پوشه shenava-koochik-ctc پیدا نشد."
+                raise HTTPException(
+                    status_code=404,
+                    detail="مدل شنوا کوچیک CTC پیدا نشد. پوشه shenava-koochik-ctc را در models بگذارید.",
+                )
+            if self.engine is not None:
+                self.status = f"مدل آماده است: {info.name_fa}"
                 return self.snapshot()
             self.loading = True
             self.status = f"در حال بارگذاری {info.name_fa}..."
             previous = self.engine
-            self.engine = None
 
         if previous is not None:
             try:
@@ -95,23 +93,22 @@ class AppState:
 
         try:
             engine = load_engine(info)
-        except TranscriptionError as exc:
+        except TranscriptionError as extra:
             with self.lock:
                 self.loading = False
-                self.active_id = None
-                self.status = str(exc)
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        except Exception as exc:
-            message = f"بارگذاری مدل ناموفق بود: {exc}"
+                self.engine = None
+                self.status = str(extra)
+            raise HTTPException(status_code=500, detail=str(extra)) from extra
+        except Exception as extra:
+            message = f"بارگذاری مدل ناموفق بود: {extra}"
             with self.lock:
                 self.loading = False
-                self.active_id = None
+                self.engine = None
                 self.status = message
-            raise HTTPException(status_code=500, detail=message) from exc
+            raise HTTPException(status_code=500, detail=message) from extra
 
         with self.lock:
             self.engine = engine
-            self.active_id = model_id
             self.loading = False
             self.status = f"مدل آماده است: {info.name_fa}"
             return self.snapshot()
@@ -123,12 +120,11 @@ class AppState:
     def transcribe_current(self, audio: np.ndarray | None = None) -> dict[str, Any]:
         with self.lock:
             engine = self.engine
-            active_id = self.active_id
-            info = self.model_map().get(active_id) if active_id else None
+            info = self.asr
             if audio is None:
                 audio = self.last_audio
             if engine is None or info is None:
-                raise HTTPException(status_code=400, detail="ابتدا یک مدل را با دکمه رادیویی انتخاب کنید.")
+                raise HTTPException(status_code=400, detail="مدل شنوا کوچیک CTC هنوز بارگذاری نشده است.")
             if audio is None or audio.size == 0:
                 raise HTTPException(status_code=400, detail="صوتی برای رونویسی وجود ندارد.")
             self.status = f"در حال رونویسی با {info.name_fa}..."
@@ -136,30 +132,45 @@ class AppState:
         started = time.perf_counter()
         try:
             text = engine.transcribe(audio, TARGET_RATE)
-        except Exception as exc:
+        except Exception as extra:
             with self.lock:
-                self.status = f"خطا در رونویسی: {exc}"
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+                self.status = f"خطا در رونویسی: {extra}"
+            raise HTTPException(status_code=500, detail=str(extra)) from extra
         elapsed_ms = int((time.perf_counter() - started) * 1000)
 
         with self.lock:
-            self.results[active_id] = {
-                "text": text,
-                "ms": elapsed_ms,
-                "model": info.name_fa,
-            }
+            self.last_transcript = text
+            self.last_asr_ms = elapsed_ms
             self.status = "رونویسی تمام شد."
             return {
-                "model_id": active_id,
+                "model_id": info.id,
                 "model": info.name_fa,
                 "text": text,
                 "ms": elapsed_ms,
                 "state": self.snapshot(),
             }
 
+    def run_llm_test(self, text: str) -> dict[str, Any]:
+        cleaned = text.strip()
+        if not cleaned:
+            raise HTTPException(status_code=400, detail="متنی برای آزمایش LLM وجود ندارد.")
+        with self.lock:
+            self.status = "در حال آزمایش مدل‌های Ollama..."
+            self.last_transcript = cleaned
+        try:
+            payload = test_models(cleaned)
+        except OllamaError as extra:
+            with self.lock:
+                self.status = str(extra)
+            raise HTTPException(status_code=503, detail=str(extra)) from extra
+        with self.lock:
+            self.llm_results = payload
+            self.status = "آزمایش LLM تمام شد."
+            return {"llm": payload, "state": self.snapshot()}
+
 
 state = AppState()
-app = FastAPI(title="تایپ گفتاری فارسی", version="1.0.0")
+app = FastAPI(title="تایپ گفتاری فارسی", version="1.1.0")
 
 
 def reset_state(models_dir: str | Path | None = None) -> AppState:
@@ -179,15 +190,9 @@ def get_state() -> dict[str, Any]:
     return state.snapshot()
 
 
-@app.post("/api/refresh")
-def refresh_models() -> dict[str, Any]:
-    state.refresh()
-    return state.snapshot()
-
-
-@app.post("/api/select")
-def select_model(body: SelectBody) -> dict[str, Any]:
-    return state.select(body.model_id)
+@app.post("/api/boot")
+def boot_asr() -> dict[str, Any]:
+    return state.boot()
 
 
 @app.post("/api/transcribe")
@@ -197,8 +202,8 @@ async def transcribe_upload(file: UploadFile = File(...)) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="فایل خالی است.")
     try:
         audio = load_audio_file(data, file.filename or "audio.wav")
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as extra:
+        raise HTTPException(status_code=400, detail=str(extra)) from extra
     state.remember_audio(audio)
     return state.transcribe_current(audio)
 
@@ -206,6 +211,11 @@ async def transcribe_upload(file: UploadFile = File(...)) -> dict[str, Any]:
 @app.post("/api/transcribe-last")
 def transcribe_last() -> dict[str, Any]:
     return state.transcribe_current()
+
+
+@app.post("/api/llm-test")
+def llm_test(body: LlmTestBody) -> dict[str, Any]:
+    return state.run_llm_test(body.text)
 
 
 @app.websocket("/ws/stream")
@@ -216,7 +226,7 @@ async def stream_transcription(websocket: WebSocket) -> None:
     with state.lock:
         engine = state.engine
         if engine is None:
-            await websocket.send_json({"type": "error", "message": "ابتدا یک مدل را انتخاب کنید."})
+            await websocket.send_json({"type": "error", "message": "مدل شنوا هنوز بارگذاری نشده است."})
             await websocket.close()
             return
         engine.start_stream()
@@ -250,19 +260,16 @@ async def stream_transcription(websocket: WebSocket) -> None:
         full = concat(chunks)
         if full.size:
             state.remember_audio(full)
-        final_text = ""
         if engine is not None:
             try:
                 if engine.supports_stream:
-                    streamed = engine.end_stream()
-                    final_text = streamed
+                    engine.end_stream()
                 if full.size:
                     result = state.transcribe_current(full)
-                    final_text = result["text"]
                     await websocket.send_json(
                         {
                             "type": "final",
-                            "text": final_text,
+                            "text": result["text"],
                             "ms": result["ms"],
                             "model_id": result["model_id"],
                             "model": result["model"],
@@ -270,15 +277,15 @@ async def stream_transcription(websocket: WebSocket) -> None:
                         }
                     )
                 else:
-                    await websocket.send_json({"type": "final", "text": final_text, "ms": 0})
-            except HTTPException as exc:
+                    await websocket.send_json({"type": "final", "text": "", "ms": 0})
+            except HTTPException as extra:
                 try:
-                    await websocket.send_json({"type": "error", "message": exc.detail})
+                    await websocket.send_json({"type": "error", "message": extra.detail})
                 except Exception:
                     pass
-            except Exception as exc:
+            except Exception as extra:
                 try:
-                    await websocket.send_json({"type": "error", "message": str(exc)})
+                    await websocket.send_json({"type": "error", "message": str(extra)})
                 except Exception:
                     pass
         try:

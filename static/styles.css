@@ -321,6 +321,10 @@ button,
 .compare-card h3 {
   margin: 0 0 6px;
   font-size: 0.95rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
 }
 
 .compare-card p {

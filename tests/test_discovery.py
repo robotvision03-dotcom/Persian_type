@@ -6,7 +6,7 @@ from unittest.mock import patch
 import numpy as np
 
 from app.audio import int16_bytes_to_float32, normalize_audio, resample_linear
-from app.discovery import detect_engine, find_models_dir, scan_models
+from app.discovery import detect_engine, find_models_dir, find_shenava_ctc, scan_models
 
 
 def touch(path: Path, name: str) -> Path:
@@ -103,6 +103,22 @@ class DiscoveryTests(unittest.TestCase):
             by_id = {item.id: item for item in models}
             self.assertTrue(by_id["vosk-model-fa"].usable)
             self.assertFalse(by_id["piper-voice-fa"].usable)
+
+    def test_find_shenava_ctc_prefers_named_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ctc = root / "shenava-koochik-ctc"
+            ctc.mkdir()
+            touch(ctc, "model.onnx")
+            touch(ctc, "tokens.txt")
+            other = root / "vosk-model-fa"
+            other.mkdir()
+            touch(other, "am/final.mdl")
+            _path, models = scan_models(root)
+            chosen = find_shenava_ctc(models)
+            self.assertIsNotNone(chosen)
+            self.assertEqual(chosen.id, "shenava-koochik-ctc")
+            self.assertEqual(chosen.engine, "sherpa_ctc")
 
     def test_find_models_dir_env(self):
         with tempfile.TemporaryDirectory() as tmp:
