@@ -88,6 +88,9 @@ class AppointmentBody(BaseModel):
 
 class InspectionBody(BaseModel):
     summary: str = ""
+    notes: str = ""
+    report: dict[str, Any] | None = None
+    finalize: bool = True
 
 
 class VehicleBody(BaseModel):
@@ -99,6 +102,14 @@ class VehicleBody(BaseModel):
     color: str | None = None
     body_type: str | None = None
     body_condition: str | None = None
+    paint_status: str | None = None
+    cabin_condition: str | None = None
+    technical_condition: str | None = None
+    fuel_type: str | None = None
+    engine: str | None = None
+    document_type: str | None = None
+    insurance_months: int | None = None
+    strengths: list[str] | str | None = None
     inspection_summary: str | None = None
     photos: list[str] | None = None
     starting_price: int | None = None
@@ -318,16 +329,53 @@ def office_update_vehicle(vehicle_id: int, body: VehicleBody, request: Request, 
     return svc.update_vehicle(vehicle_id, body.model_dump(exclude_none=True), db(request))
 
 
+@router.get("/inspection-catalog")
+def catalog(request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    current_user(request, authorization)
+    return svc.inspection_catalog()
+
+
 @router.post("/office/vehicles/{vehicle_id}/inspect")
 def office_inspect(vehicle_id: int, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     user = staff_user(request, authorization)
     return svc.start_inspection(vehicle_id, db(request))
 
 
+@router.get("/office/vehicles/{vehicle_id}/inspection")
+def office_get_inspection(vehicle_id: int, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    staff_user(request, authorization)
+    inspection = svc.get_inspection(vehicle_id, db(request))
+    if inspection is None:
+        raise HTTPException(status_code=404, detail="کارشناسی ثبت نشده است.")
+    return inspection
+
+
+@router.put("/office/vehicles/{vehicle_id}/inspection")
+def office_save_inspection(vehicle_id: int, body: InspectionBody, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    staff_user(request, authorization)
+    return svc.save_inspection(
+        vehicle_id,
+        report=body.report,
+        summary=body.summary,
+        notes=body.notes,
+        finalize=False,
+        db_path=db(request),
+    )
+
+
 @router.post("/office/vehicles/{vehicle_id}/finalize-inspection")
 def office_finalize(vehicle_id: int, body: InspectionBody, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     user = staff_user(request, authorization)
-    return svc.finalize_inspection(vehicle_id, body.summary, db(request))
+    if body.report is not None:
+        return svc.save_inspection(
+            vehicle_id,
+            report=body.report,
+            summary=body.summary,
+            notes=body.notes,
+            finalize=True,
+            db_path=db(request),
+        )
+    return svc.finalize_inspection(vehicle_id, body.summary, db_path=db(request))
 
 
 @router.post("/office/vehicles/{vehicle_id}/approve")

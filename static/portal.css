@@ -4,7 +4,8 @@
   max-width: 420px;
 }
 
-.portal input {
+.portal input,
+.portal select {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 10px 12px;
@@ -34,11 +35,126 @@
   display: none !important;
 }
 
-.vehicle-form {
+.vehicle-form,
+.inspection-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.vehicle-form h4,
+.inspection-form h4 {
+  margin: 8px 0 0;
+}
+
+.spec-grid,
+.inspect-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.spec-field,
+.inspect-item {
+  display: grid;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.spec-field.wide {
+  grid-column: 1 / -1;
+}
+
+.portal select,
+.vehicle-form input,
+.inspection-form input {
+  width: 100%;
+}
+
+.inspect-acc {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: rgba(8, 18, 14, 0.35);
+}
+
+.inspect-acc summary {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.inspect-acc .score {
+  color: var(--teal-bright);
+  font-weight: 700;
+}
+
+.inspect-group h5 {
+  margin: 12px 0 6px;
+}
+
+.inspect-tools {
+  margin: 8px 0;
+}
+
+.body-map {
   display: flex;
   flex-wrap: wrap;
+  gap: 6px;
+}
+
+.body-chip {
+  border: 1px solid var(--line);
+  background: rgba(244, 239, 226, 0.06);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.body-chip.issue {
+  border-color: rgba(179, 57, 45, 0.6);
+  color: #f3c0b8;
+}
+
+.body-chip.ok {
+  border-color: rgba(46, 163, 141, 0.45);
+}
+
+.status-pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.78rem;
+}
+
+.status-pill.ok {
+  background: rgba(46, 163, 141, 0.18);
+  color: #9be4d3;
+}
+
+.status-pill.issue {
+  background: rgba(179, 57, 45, 0.18);
+  color: #f3c0b8;
+}
+
+.spec-readout {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 8px;
-  margin-top: 10px;
+  margin: 8px 0;
+}
+
+.spec-readout p {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 0.86rem;
 }
 
 .next-bid-row {

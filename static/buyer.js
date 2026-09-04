@@ -22,6 +22,64 @@ function money(value) {
   return Number(value || 0).toLocaleString("fa-IR");
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function specLine(label, value) {
+  if (value === null || value === undefined || value === "") return "";
+  return `<p><strong>${escapeHtml(label)}</strong><br />${escapeHtml(value)}</p>`;
+}
+
+function renderInspection(item) {
+  const report = item.inspection || {};
+  const categories = report.categories || [];
+  if (!categories.length && !item.inspection_summary) {
+    return `<p>کارشناسی: انجام شده</p>`;
+  }
+  const strengths = (item.strengths || report.strengths || []).map((row) => `<li>${escapeHtml(row)}</li>`).join("");
+  const blocks = categories
+    .map((category) => {
+      const groups = (category.groups || [{ items: category.items || [] }])
+        .map((group) => {
+          const rows = (group.items || [])
+            .map((row) => {
+              const cls = row.ok ? "ok" : "issue";
+              return `<li>${escapeHtml(row.label)}: <span class="status-pill ${cls}">${escapeHtml(row.status)}</span></li>`;
+            })
+            .join("");
+          return `<div class="inspect-group"><h5>${escapeHtml(group.label || category.label)}</h5><ul>${rows}</ul></div>`;
+        })
+        .join("");
+      return `<details class="inspect-acc"><summary><strong>${escapeHtml(category.label)}</strong><span class="score">${escapeHtml(category.score)}</span></summary>
+        <p class="hint">${escapeHtml(category.summary || "")}</p>${groups}</details>`;
+    })
+    .join("");
+  return `<details class="inspect-acc" open>
+      <summary><strong>مشخصات کامل و گزارش کارشناسی</strong></summary>
+      <div class="spec-readout">
+        ${specLine("نوع بدنه", item.body_type)}
+        ${specLine("وضعیت رنگ", item.paint_status)}
+        ${specLine("وضعیت بدنه", item.body_condition)}
+        ${specLine("وضعیت اتاق", item.cabin_condition)}
+        ${specLine("وضعیت فنی", item.technical_condition)}
+        ${specLine("رنگ بدنه", item.color)}
+        ${specLine("گیربکس", item.transmission)}
+        ${specLine("سوخت", item.fuel_type)}
+        ${specLine("موتور", item.engine)}
+        ${specLine("نوع سند", item.document_type)}
+        ${item.insurance_months ? specLine("مانده بیمه", item.insurance_months + " ماه") : ""}
+      </div>
+      <p>${escapeHtml(item.inspection_summary || report.summary || "")}</p>
+      ${strengths ? `<p>نقاط قوت</p><ul>${strengths}</ul>` : ""}
+      ${blocks}
+    </details>`;
+}
+
 async function refresh() {
   if (!token()) {
     $("auth-box").classList.remove("hidden");
@@ -46,8 +104,8 @@ async function refresh() {
         .map((item) => {
           const auction = item.auction || {};
           return `<article class="card"><h3>${item.brand} ${item.model}</h3>
-            <p>سال ${item.year || "—"} · ${item.mileage ? item.mileage + " کیلومتر" : ""} · ${item.transmission || ""}</p>
-            <p>کارشناسی: ${item.inspection_summary || "انجام شده"}</p>
+            <p>سال ${item.year || "—"} · ${item.mileage ? item.mileage + " کیلومتر" : ""} · ${item.transmission || ""} · ${item.color || ""}</p>
+            ${renderInspection(item)}
             <p>پیشنهاد فعلی: ${money(auction.current_price)}</p>
             <p>حداقل افزایش: ${money(auction.bid_increment)} (۰٫۵٪)</p>
             <p class="next-bid-row">حداقل بعدی: ${money(auction.minimum_next_bid)}

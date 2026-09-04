@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .catalog import public_report
 from .engine import live_increment, minimum_next_bid
 
 HIDDEN_VEHICLE_KEYS = (
@@ -57,6 +58,11 @@ def buyer_can_see_vehicle(vehicle: dict[str, Any], auction: dict[str, Any] | Non
 def public_vehicle(vehicle: dict[str, Any], auction: dict[str, Any] | None = None) -> dict[str, Any]:
     if not buyer_can_see_vehicle(vehicle, auction):
         raise PermissionError("vehicle_hidden")
+    inspection = vehicle.get("inspection") if isinstance(vehicle.get("inspection"), dict) else {}
+    if inspection:
+        report = inspection.get("public_report") or public_report(inspection.get("report"))
+    else:
+        report = {"summary": vehicle.get("inspection_summary") or "", "strengths": [], "categories": []}
     payload = {
         "id": vehicle["id"],
         "status": vehicle.get("status"),
@@ -68,7 +74,16 @@ def public_vehicle(vehicle: dict[str, Any], auction: dict[str, Any] | None = Non
         "color": vehicle.get("color"),
         "body_type": vehicle.get("body_type"),
         "body_condition": vehicle.get("body_condition"),
-        "inspection_summary": vehicle.get("inspection_summary"),
+        "paint_status": vehicle.get("paint_status"),
+        "cabin_condition": vehicle.get("cabin_condition"),
+        "technical_condition": vehicle.get("technical_condition"),
+        "fuel_type": vehicle.get("fuel_type"),
+        "engine": vehicle.get("engine"),
+        "document_type": vehicle.get("document_type"),
+        "insurance_months": vehicle.get("insurance_months"),
+        "strengths": vehicle.get("strengths") if isinstance(vehicle.get("strengths"), list) else [],
+        "inspection_summary": vehicle.get("inspection_summary") or report.get("summary"),
+        "inspection": report,
         "photos": _photos(vehicle.get("photos")),
     }
     if auction:

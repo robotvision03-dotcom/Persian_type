@@ -91,6 +91,14 @@ CREATE TABLE IF NOT EXISTS vehicles (
     color TEXT NOT NULL DEFAULT '',
     body_type TEXT NOT NULL DEFAULT '',
     body_condition TEXT NOT NULL DEFAULT '',
+    paint_status TEXT NOT NULL DEFAULT '',
+    cabin_condition TEXT NOT NULL DEFAULT '',
+    technical_condition TEXT NOT NULL DEFAULT '',
+    fuel_type TEXT NOT NULL DEFAULT '',
+    engine TEXT NOT NULL DEFAULT '',
+    document_type TEXT NOT NULL DEFAULT '',
+    insurance_months INTEGER,
+    strengths TEXT NOT NULL DEFAULT '[]',
     inspection_summary TEXT NOT NULL DEFAULT '',
     photos TEXT NOT NULL DEFAULT '[]',
     starting_price INTEGER NOT NULL DEFAULT 0,
@@ -113,6 +121,7 @@ CREATE TABLE IF NOT EXISTS inspections (
     status TEXT NOT NULL DEFAULT 'IN_PROGRESS',
     summary TEXT NOT NULL DEFAULT '',
     notes TEXT NOT NULL DEFAULT '',
+    report_json TEXT NOT NULL DEFAULT '{}',
     finalized_at TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY (vehicle_id) REFERENCES vehicles(id)
@@ -206,11 +215,40 @@ CREATE TABLE IF NOT EXISTS marketplace_settings (
 """
 
 
+VEHICLE_EXTRA_COLUMNS = {
+    "paint_status": "TEXT NOT NULL DEFAULT ''",
+    "cabin_condition": "TEXT NOT NULL DEFAULT ''",
+    "technical_condition": "TEXT NOT NULL DEFAULT ''",
+    "fuel_type": "TEXT NOT NULL DEFAULT ''",
+    "engine": "TEXT NOT NULL DEFAULT ''",
+    "document_type": "TEXT NOT NULL DEFAULT ''",
+    "insurance_months": "INTEGER",
+    "strengths": "TEXT NOT NULL DEFAULT '[]'",
+}
+
+INSPECTION_EXTRA_COLUMNS = {
+    "report_json": "TEXT NOT NULL DEFAULT '{}'",
+}
+
+
+def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    for name, ddl in columns.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+
+
+def migrate_marketplace(conn: sqlite3.Connection) -> None:
+    _ensure_columns(conn, "vehicles", VEHICLE_EXTRA_COLUMNS)
+    _ensure_columns(conn, "inspections", INSPECTION_EXTRA_COLUMNS)
+
+
 def init_marketplace(db_path: Path | None = None) -> Path:
     path = db_path or default_db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with get_conn(path) as conn:
         conn.executescript(SCHEMA)
+        migrate_marketplace(conn)
     return path
 
 

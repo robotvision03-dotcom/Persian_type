@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from ..booking import list_appointments
+from .catalog import empty_report, inspection_catalog, normalize_report, public_report
 from .db import get_conn, init_marketplace
 from .engine import (
     DEFAULT_MIN_INCREMENT,
@@ -434,18 +435,84 @@ def buyer_appointments(db_path: Path | None = None) -> list[dict[str, Any]]:
     return [safe_appointment(row) for row in office_appointments(db_path) if row.get("status") != "CANCELLED"]
 
 
+def _json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                return parsed
+        except json.JSONDecodeError:
+            return [part.strip() for part in value.replace("\n", "،").split("،") if part.strip()]
+    return []
+
+
+def _json_obj(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _inspection_from_row(row: Any) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    data = dict(row)
+    report = normalize_report(_json_obj(data.get("report_json")))
+    data["report"] = report
+    data["public_report"] = public_report(report)
+    return data
+
+
+def _latest_inspection_row(conn: Any, vehicle_id: int) -> Any:
+    return conn.execute(
+        "SELECT * FROM inspections WHERE vehicle_id = ? ORDER BY id DESC LIMIT 1",
+        (vehicle_id,),
+    ).fetchone()
+
+
+def _hydrate_vehicle(row: Any, inspection: dict[str, Any] | None = None) -> dict[str, Any]:
+    data = dict(row)
+    data["strengths"] = _json_list(data.get("strengths"))
+    data["inspection"] = inspection
+    return data
+
+
+def get_inspection(vehicle_id: int, db_path: Path | None = None) -> dict[str, Any] | None:
+    with get_conn(db_path) as conn:
+        return _inspection_from_row(_latest_inspection_row(conn, vehicle_id))
+
+
 def get_vehicle(vehicle_id: int, db_path: Path | None = None) -> dict[str, Any]:
     with get_conn(db_path) as conn:
         row = conn.execute("SELECT * FROM vehicles WHERE id = ?", (vehicle_id,)).fetchone()
+        inspection = _inspection_from_row(_latest_inspection_row(conn, vehicle_id)) if row else None
     if row is None:
         raise MarketplaceError("خودرو پیدا نشد.", 404)
-    return dict(row)
+    return _hydrate_vehicle(row, inspection)
 
 
 def list_vehicles(db_path: Path | None = None) -> list[dict[str, Any]]:
     with get_conn(db_path) as conn:
         rows = conn.execute("SELECT * FROM vehicles ORDER BY id DESC").fetchall()
-    return [dict(row) for row in rows]
+        inspections = {
+            item["vehicle_id"]: _inspection_from_row(item)
+            for item in conn.execute(
+                """
+                SELECT * FROM inspections WHERE id IN (
+                    SELECT MAX(id) FROM inspections GROUP BY vehicle_id
+                )
+                """
+            ).fetchall()
+        }
+    return [_hydrate_vehicle(row, inspections.get(row["id"])) for row in rows]
 
 
 def update_vehicle(vehicle_id: int, fields: dict[str, Any], db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
@@ -458,6 +525,14 @@ def update_vehicle(vehicle_id: int, fields: dict[str, Any], db_path: Path | None
         "color",
         "body_type",
         "body_condition",
+        "paint_status",
+        "cabin_condition",
+        "technical_condition",
+        "fuel_type",
+        "engine",
+        "document_type",
+        "insurance_months",
+        "strengths",
         "inspection_summary",
         "photos",
         "starting_price",
@@ -472,6 +547,8 @@ def update_vehicle(vehicle_id: int, fields: dict[str, Any], db_path: Path | None
     updates = {key: fields[key] for key in allowed if key in fields}
     if "photos" in updates and not isinstance(updates["photos"], str):
         updates["photos"] = json.dumps(updates["photos"], ensure_ascii=False)
+    if "strengths" in updates and not isinstance(updates["strengths"], str):
+        updates["strengths"] = json.dumps(_json_list(updates["strengths"]), ensure_ascii=False)
     updates["updated_at"] = now_iso(now)
     sets = ", ".join(f"{key} = ?" for key in updates)
     with get_conn(db_path) as conn:
@@ -481,11 +558,25 @@ def update_vehicle(vehicle_id: int, fields: dict[str, Any], db_path: Path | None
 
 def start_inspection(vehicle_id: int, db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
     stamp = now_iso(now)
+    report = json.dumps(empty_report(), ensure_ascii=False)
     with get_conn(db_path) as conn:
-        conn.execute(
-            "INSERT INTO inspections (vehicle_id, status, created_at) VALUES (?, 'IN_PROGRESS', ?)",
-            (vehicle_id, stamp),
-        )
+        existing = _latest_inspection_row(conn, vehicle_id)
+        if existing is None:
+            conn.execute(
+                """
+                INSERT INTO inspections (vehicle_id, status, summary, report_json, created_at)
+                VALUES (?, 'IN_PROGRESS', '', ?, ?)
+                """,
+                (vehicle_id, report, stamp),
+            )
+        elif existing["status"] != "IN_PROGRESS":
+            conn.execute(
+                """
+                INSERT INTO inspections (vehicle_id, status, summary, report_json, created_at)
+                VALUES (?, 'IN_PROGRESS', '', ?, ?)
+                """,
+                (vehicle_id, existing["report_json"] or report, stamp),
+            )
         conn.execute(
             "UPDATE vehicles SET status = 'INSPECTION_IN_PROGRESS', updated_at = ? WHERE id = ?",
             (stamp, vehicle_id),
@@ -497,20 +588,91 @@ def start_inspection(vehicle_id: int, db_path: Path | None = None, now: datetime
     return get_vehicle(vehicle_id, db_path)
 
 
-def finalize_inspection(vehicle_id: int, summary: str = "", db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
+def save_inspection(
+    vehicle_id: int,
+    report: dict[str, Any] | None = None,
+    summary: str = "",
+    notes: str = "",
+    finalize: bool = False,
+    db_path: Path | None = None,
+    now: datetime | str | None = None,
+) -> dict[str, Any]:
     stamp = now_iso(now)
+    normalized = normalize_report(report)
+    text = (summary or normalized.get("summary") or "").strip()
+    payload = json.dumps(normalized, ensure_ascii=False)
     with get_conn(db_path) as conn:
-        conn.execute(
-            "UPDATE inspections SET status = 'COMPLETED', summary = ?, finalized_at = ? WHERE vehicle_id = ?",
-            (summary, stamp, vehicle_id),
-        )
+        row = _latest_inspection_row(conn, vehicle_id)
+        if row is None:
+            conn.execute(
+                """
+                INSERT INTO inspections (vehicle_id, status, summary, notes, report_json, created_at)
+                VALUES (?, 'IN_PROGRESS', ?, ?, ?, ?)
+                """,
+                (vehicle_id, text, notes, payload, stamp),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE inspections SET summary = ?, notes = ?, report_json = ?
+                WHERE id = ?
+                """,
+                (text or row["summary"], notes if notes else row["notes"], payload, row["id"]),
+            )
+            vehicle = conn.execute(
+                "SELECT status, published_for_bidding FROM vehicles WHERE id = ?",
+                (vehicle_id,),
+            ).fetchone()
+            if vehicle and not vehicle["published_for_bidding"] and vehicle["status"] not in {"BIDDING_ACTIVE", "SOLD", "CANCELLED"}:
+                conn.execute(
+                    "UPDATE vehicles SET status = 'INSPECTION_IN_PROGRESS', updated_at = ? WHERE id = ?",
+                    (stamp, vehicle_id),
+                )
+    if finalize:
+        return finalize_inspection(vehicle_id, text, report=normalized, db_path=db_path, now=now)
+    return get_vehicle(vehicle_id, db_path)
+
+
+def finalize_inspection(
+    vehicle_id: int,
+    summary: str = "",
+    report: dict[str, Any] | None = None,
+    db_path: Path | None = None,
+    now: datetime | str | None = None,
+) -> dict[str, Any]:
+    stamp = now_iso(now)
+    normalized = normalize_report(report) if report is not None else None
+    text = (summary or (normalized or {}).get("summary") or "").strip()
+    with get_conn(db_path) as conn:
+        row = _latest_inspection_row(conn, vehicle_id)
+        if row is None:
+            conn.execute(
+                """
+                INSERT INTO inspections (vehicle_id, status, summary, report_json, finalized_at, created_at)
+                VALUES (?, 'COMPLETED', ?, ?, ?, ?)
+                """,
+                (vehicle_id, text, json.dumps(normalized or empty_report(), ensure_ascii=False), stamp, stamp),
+            )
+        else:
+            stored = normalize_report(normalized or _json_obj(row["report_json"]))
+            conn.execute(
+                """
+                UPDATE inspections SET status = 'COMPLETED', summary = ?, report_json = ?, finalized_at = ?
+                WHERE id = ?
+                """,
+                (text or row["summary"], json.dumps(stored, ensure_ascii=False), stamp, row["id"]),
+            )
+            normalized = stored
+        strengths = json.dumps((normalized or empty_report()).get("strengths") or [], ensure_ascii=False)
         conn.execute(
             """
             UPDATE vehicles SET status = 'PENDING_OFFICE_APPROVAL', inspection_completed = 1,
-                inspection_summary = COALESCE(NULLIF(?, ''), inspection_summary), updated_at = ?
+                inspection_summary = COALESCE(NULLIF(?, ''), inspection_summary),
+                strengths = CASE WHEN strengths IN ('', '[]') THEN ? ELSE strengths END,
+                updated_at = ?
             WHERE id = ?
             """,
-            (summary, stamp, vehicle_id),
+            (text, strengths, stamp, vehicle_id),
         )
         conn.execute(
             "UPDATE marketplace_appointments SET status = 'INSPECTION_COMPLETED' WHERE id = (SELECT appointment_id FROM vehicles WHERE id = ?)",

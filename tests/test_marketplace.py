@@ -312,6 +312,89 @@ class SecurityTests(unittest.TestCase):
         self.assertGreater(match_score(vehicle, prefs), 80)
 
 
+class InspectionCatalogTests(unittest.TestCase):
+    def test_body_and_cabin_defaults(self):
+        catalog = svc.inspection_catalog()
+        labels = {item["label"] for cat in catalog["categories"] for item in cat["items"]}
+        self.assertIn("بدنه و شاسی", [cat["label"] for cat in catalog["categories"]])
+        self.assertIn("اتاق و کابین", [cat["label"] for cat in catalog["categories"]])
+        for needed in ("کاپوت", "شاسی جلو", "درب جلو راننده", "سقف", "وضعیت کلی اتاق"):
+            self.assertIn(needed, labels)
+        paint = next(field for field in catalog["vehicle_fields"] if field["key"] == "paint_status")
+        self.assertIn("رنگ دارد", paint["options"])
+        cabin = next(field for field in catalog["vehicle_fields"] if field["key"] == "cabin_condition")
+        self.assertIn("سالم", cabin["options"])
+
+    def test_unpublished_hides_inspection_and_published_sends_full_spec(self):
+        tmp, path = _db()
+        with tmp:
+            when = datetime(2026, 9, 5, 9, 0, 0)
+            appt = svc.create_appointment("2026-09-05", "10:30", "علی رضایی", "09120000000", db_path=path, now=when)
+            vehicle = next(item for item in svc.list_vehicles(path) if item["appointment_id"] == appt["id"])
+            _, buyer = _buyer(path, "b@ex.com")
+            svc.start_inspection(vehicle["id"], db_path=path, now=when)
+            report = {
+                "summary": "کاپوت رنگ دارد",
+                "strengths": ["کارکرد کم نسبت به سال"],
+                "categories": {"body": {"items": {"hood": {"status": "رنگ دارد", "note": ""}}}},
+            }
+            svc.save_inspection(vehicle["id"], report=report, db_path=path, now=when)
+            svc.finalize_inspection(vehicle["id"], "کاپوت رنگ دارد", report=report, db_path=path, now=when)
+            svc.update_vehicle(
+                vehicle["id"],
+                {
+                    "brand": "تویوتا",
+                    "model": "کرولا",
+                    "year": 2025,
+                    "mileage": 10,
+                    "transmission": "اتومات",
+                    "color": "سفید",
+                    "paint_status": "رنگ دارد",
+                    "cabin_condition": "سالم",
+                    "technical_condition": "سالم",
+                    "body_type": "سدان",
+                    "fuel_type": "هیبرید",
+                    "document_type": "تک برگی",
+                    "starting_price": 1000,
+                    "vin": "SECRETVIN",
+                    "plate": "12ب345",
+                },
+                db_path=path,
+                now=when,
+            )
+            self.assertEqual(svc.buyer_visible_auctions(buyer, path, now=when), [])
+            with self.assertRaises(Exception):
+                from app.marketplace.privacy import public_vehicle
+
+                public_vehicle(svc.get_vehicle(vehicle["id"], path))
+            svc.approve_vehicle(vehicle["id"], db_path=path, now=when)
+            self.assertEqual(svc.buyer_visible_auctions(buyer, path, now=when), [])
+            auction = svc.publish_vehicle(vehicle["id"], increment=100, db_path=path, now=when)
+            visible = svc.buyer_visible_auctions(buyer, path, now=when)
+            self.assertEqual(len(visible), 1)
+            item = visible[0]
+            self.assertEqual(item["paint_status"], "رنگ دارد")
+            self.assertEqual(item["cabin_condition"], "سالم")
+            self.assertEqual(item["fuel_type"], "هیبرید")
+            self.assertNotIn("vin", item)
+            self.assertNotIn("customer_name", item)
+            hood = next(
+                row
+                for cat in item["inspection"]["categories"]
+                if cat["id"] == "body"
+                for row in cat["items"]
+                if row["id"] == "hood"
+            )
+            self.assertEqual(hood["status"], "رنگ دارد")
+            self.assertFalse(hood["ok"])
+            doors = next(row for cat in item["inspection"]["categories"] if cat["id"] == "body" for row in cat["items"] if row["id"] == "front_driver_door")
+            self.assertEqual(doors["status"], "سالم")
+            detail = svc.buyer_auction_detail(auction["id"], buyer, db_path=path, now=when)
+            self.assertEqual(detail["inspection"]["summary"], "کاپوت رنگ دارد")
+            self.assertIn("کارکرد کم نسبت به سال", detail["strengths"])
+            self.assertNotIn("SECRETVIN", str(detail))
+
+
 @unittest.skipUnless(TestClient, "httpx is required")
 class MarketplaceApiTests(unittest.TestCase):
     def test_http_auth_and_privacy(self):
@@ -342,6 +425,27 @@ class MarketplaceApiTests(unittest.TestCase):
         secret = client.get(f"/office/vehicles/{vehicle_id}", headers=buyer_h)
         self.assertEqual(secret.status_code, 403)
         self.assertEqual(client.get("/auctions", headers=buyer_h).json(), [])
+        catalog = client.get("/inspection-catalog", headers=office_h).json()
+        self.assertTrue(any(cat["id"] == "body" for cat in catalog["categories"]))
+        client.post(f"/office/vehicles/{vehicle_id}/inspect", headers=office_h)
+        client.put(
+            f"/office/vehicles/{vehicle_id}",
+            json={"brand": "تویوتا", "model": "کرولا", "paint_status": "رنگ دارد", "cabin_condition": "سالم", "starting_price": 1000},
+            headers=office_h,
+        )
+        client.post(
+            f"/office/vehicles/{vehicle_id}/finalize-inspection",
+            json={"summary": "کاپوت رنگ دارد", "report": {"categories": {"body": {"items": {"hood": {"status": "رنگ دارد"}}}}}},
+            headers=office_h,
+        )
+        client.post(f"/office/vehicles/{vehicle_id}/approve", headers=office_h)
+        self.assertEqual(client.get("/auctions", headers=buyer_h).json(), [])
+        client.post(f"/office/vehicles/{vehicle_id}/publish", json={}, headers=office_h)
+        listed = client.get("/auctions", headers=buyer_h).json()
+        self.assertEqual(listed[0]["paint_status"], "رنگ دارد")
+        hood = next(row for cat in listed[0]["inspection"]["categories"] if cat["id"] == "body" for row in cat["items"] if row["id"] == "hood")
+        self.assertEqual(hood["status"], "رنگ دارد")
+        self.assertNotIn("customer_name", listed[0])
         tmp.cleanup()
 
 
