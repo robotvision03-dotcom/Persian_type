@@ -508,13 +508,18 @@ $("appt-form").addEventListener("submit", async (event) => {
     customer_name: form.get("customer_name"),
     customer_phone: form.get("customer_phone"),
   };
+  if (!payload.date || !payload.time) {
+    alert("روز و ساعت شمسی را انتخاب کنید.");
+    return;
+  }
   const editId = form.get("appointment_id");
   if (editId) {
     await api(`/office/appointments/${editId}`, { method: "PUT", body: JSON.stringify(payload) });
   } else {
     await api("/office/appointments", { method: "POST", body: JSON.stringify(payload) });
   }
-  resetApptForm();
+  apptDay = payload.date;
+  await resetApptForm();
   refresh();
 });
 
@@ -559,15 +564,21 @@ $("express-form").addEventListener("submit", async (event) => {
   };
   if (form.get("year")) payload.year = Number(form.get("year"));
   if (form.get("starting_price")) payload.starting_price = Number(form.get("starting_price"));
+  if (!payload.date || !payload.time) {
+    alert("روز و ساعت شمسی را انتخاب کنید.");
+    return;
+  }
   await api("/office/appointments", { method: "POST", body: JSON.stringify(payload) });
+  apptDay = payload.date;
   event.target.reset();
+  await fillNow(event.target, "express");
   refresh();
 });
 
 document.addEventListener("submit", async (event) => {
   const vehicleForm = event.target.closest(".vehicle-form");
   const inspectForm = event.target.closest(".inspection-form");
-  if (vehicleForm) {
+  if (vehicleForm && vehicleForm.getAttribute("data-id")) {
     event.preventDefault();
     const id = vehicleForm.getAttribute("data-id");
     const data = Object.fromEntries(new FormData(vehicleForm).entries());
