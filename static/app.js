@@ -136,6 +136,11 @@ async function selectModel(modelId) {
     }
   } catch (error) {
     statusLine.textContent = error.message;
+    try {
+      await fetchState();
+    } catch (_refreshError) {
+      startBtn.disabled = true;
+    }
     alert(error.message);
   } finally {
     selecting = false;
