@@ -286,9 +286,16 @@ async function refresh(options) {
     $("appts").innerHTML = appts.length
       ? `<ul>${appts.map((row) => `<li>${row.date} ${row.time} — نوبت</li>`).join("")}</ul>`
       : "نوبتی نیست.";
+    const hist = await api("/buyers/me/auctions");
     await loadNotes();
-    const won = ($("winner-banner") && !$("winner-banner").classList.contains("hidden")) || !(options && options.live);
-    if (won) {
+    const winning = hist.winning || [];
+    if (winning.length && $("winner-banner") && $("winner-banner").classList.contains("hidden")) {
+      $("winner-banner").classList.remove("hidden");
+      $("winner-banner").innerHTML = winning
+        .map((row) => `<strong>شما برنده مزایده شدید</strong><br />مبلغ نهایی ${money(row.final_price)} تومان · وضعیت ${escapeHtml(row.status)}`)
+        .join("<hr />");
+    }
+    if (winning.length || !(options && options.live)) {
       if (!historyDay) historyDay = todayIso();
       await loadHistory(historyDay, historyPage);
     }

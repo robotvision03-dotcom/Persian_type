@@ -16,6 +16,7 @@ let apptDay = "";
 let apptPrev = "";
 let apptNext = "";
 let lastUnread = -1;
+let lastWinners = [];
 const pickers = {};
 
 function todayIso() {
@@ -72,17 +73,28 @@ function selectField(name, options, selected, extra = "") {
   return `<select name="${escapeHtml(name)}" ${extra}>${optionHtml(options, selected || "")}</select>`;
 }
 
-function paintWinnerBanner(rows) {
+function paintWinnerBanner(rows, winners) {
   const banner = $("winner-banner");
   if (!banner) return;
-  const wins = (rows || []).filter((row) => row.unread && (row.event === "WINNER_READY" || row.event === "YOU_WON" || row.event === "WINNER_ACCEPTED"));
-  if (!wins.length) {
+  const pending = winners || [];
+  const notes = (rows || []).filter((row) => row.unread && (row.event === "WINNER_READY" || row.event === "YOU_WON" || row.event === "WINNER_ACCEPTED"));
+  if (pending.length) {
+    banner.classList.remove("hidden");
+    banner.innerHTML = pending
+      .map(
+        (row) =>
+          `<strong>برنده مزایده مشخص شد</strong><br />${escapeHtml(row.brand || "")} ${escapeHtml(row.model || "")} · برنده ${escapeHtml(row.buyer_name || "#" + row.buyer_id)} · ${money(row.final_price)} تومان`
+      )
+      .join("<hr />");
+    return;
+  }
+  if (!notes.length) {
     banner.classList.add("hidden");
     banner.innerHTML = "";
     return;
   }
   banner.classList.remove("hidden");
-  banner.innerHTML = wins
+  banner.innerHTML = notes
     .map((row) => `<strong>${escapeHtml(row.title)}</strong><br />${escapeHtml(row.body || "")}`)
     .join("<hr />");
 }
@@ -109,8 +121,8 @@ function renderPendingWinners(winners) {
     .join("");
 }
 
-function renderNotes(rows) {
-  paintWinnerBanner(rows);
+function renderNotes(rows, winners) {
+  paintWinnerBanner(rows, winners);
   const box = $("notes");
   if (!box) return;
   const items = rows || [];
@@ -133,8 +145,9 @@ function renderNotes(rows) {
     .join("");
 }
 
-async function loadNotes() {
-  renderNotes(await api("/office/notifications"));
+async function loadNotes(winners) {
+  if (winners) lastWinners = winners;
+  renderNotes(await api("/office/notifications"), lastWinners);
 }
 
 async function loadHistory(day, page) {
@@ -410,8 +423,9 @@ async function refresh(options) {
       const cancelBtn = card.querySelector(".cancel-auc");
       if (cancelBtn && (!auction || auction.status !== "ACTIVE")) cancelBtn.remove();
     });
-    renderPendingWinners(dash.winners || []);
-    await loadNotes();
+    lastWinners = dash.winners || [];
+    renderPendingWinners(lastWinners);
+    await loadNotes(lastWinners);
     lastBuyers = dash.buyers || [];
     $("buyers").innerHTML = `<table class="appts"><thead><tr><th>خریدار</th><th>وضعیت</th><th></th></tr></thead><tbody>${(dash.buyers || [])
       .map(
@@ -474,9 +488,10 @@ async function refresh(options) {
       <button class="ghost suspend" data-id="${row.id}">تعلیق</button></td></tr>`
     )
     .join("")}</tbody></table>`;
-  renderPendingWinners(dash.winners || []);
+  lastWinners = dash.winners || [];
+  renderPendingWinners(lastWinners);
   startLive();
-  await loadNotes();
+  await loadNotes(lastWinners);
   if (!live) {
     if (!$("appt-form").appointment_id.value) await fillNow($("appt-form"), "appt");
     await fillNow($("express-form"), "express");
