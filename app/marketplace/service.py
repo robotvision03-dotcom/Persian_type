@@ -30,6 +30,7 @@ RESET_HOURS = 1
 DEFAULT_INCREMENT = DEFAULT_MIN_INCREMENT
 DEFAULT_DURATION_SECONDS = 60
 MATCH_THRESHOLD = 60
+LIVE_KEY = "live_revision"
 STAFF = {
     "office@center.local": ("Office123!", "OFFICE"),
     "admin@center.local": ("Admin123!", "ADMIN"),
@@ -68,6 +69,25 @@ def bootstrap(db_path: Path | None = None) -> Path:
     path = init_marketplace(db_path)
     ensure_staff_users(path)
     return path
+
+
+def _live_value(conn: Any) -> int:
+    row = conn.execute("SELECT value FROM marketplace_settings WHERE key = ?", (LIVE_KEY,)).fetchone()
+    return int(row["value"]) if row else 0
+
+
+def bump_live(conn: Any) -> int:
+    nxt = _live_value(conn) + 1
+    conn.execute(
+        "INSERT INTO marketplace_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (LIVE_KEY, str(nxt)),
+    )
+    return nxt
+
+
+def live_state(db_path: Path | None = None) -> dict[str, int]:
+    with get_conn(db_path) as conn:
+        return {"revision": _live_value(conn)}
 
 
 def ensure_staff_users(db_path: Path | None = None) -> None:
@@ -126,6 +146,7 @@ def register_buyer(
         )
         buyer_id = int(cur.lastrowid)
         conn.execute("INSERT INTO buyer_preferences (buyer_id) VALUES (?)", (buyer_id,))
+        bump_live(conn)
     return get_buyer_profile(buyer_id, db_path)
 
 
@@ -276,6 +297,7 @@ def set_buyer_status(
     values.append(buyer_id)
     with get_conn(db_path) as conn:
         conn.execute(f"UPDATE buyer_profiles SET {', '.join(parts)} WHERE id = ?", values)
+        bump_live(conn)
     profile = get_buyer_profile(buyer_id, db_path)
     if profile is None:
         raise MarketplaceError("پروفایل پیدا نشد.", 404)
@@ -380,6 +402,7 @@ def create_appointment(date: str, time: str, customer_name: str = "", customer_p
             """,
             (appt_id, customer_name, customer_phone, stamp, stamp),
         )
+        bump_live(conn)
     return get_appointment(appt_id, db_path)
 
 
@@ -407,6 +430,7 @@ def set_appointment_status(appointment_id: int, status: str, db_path: Path | Non
                 "UPDATE vehicles SET status = ?, updated_at = ? WHERE appointment_id = ?",
                 (vehicle_status, now_iso(now), appointment_id),
             )
+        bump_live(conn)
     return get_appointment(appointment_id, db_path)
 
 
@@ -691,6 +715,7 @@ def approve_vehicle(vehicle_id: int, db_path: Path | None = None, now: datetime 
             "UPDATE vehicles SET status = 'READY_FOR_BIDDING', office_approved = 1, updated_at = ? WHERE id = ?",
             (stamp, vehicle_id),
         )
+        bump_live(conn)
     return get_vehicle(vehicle_id, db_path)
 
 
@@ -747,6 +772,7 @@ def publish_vehicle(
             ),
         )
         auction_id = int(cur.lastrowid)
+        bump_live(conn)
     invite_buyers(auction_id, vehicle_id, participant_policy, db_path=db_path, now=stamp)
     return get_auction(auction_id, db_path)
 
@@ -793,7 +819,11 @@ def get_auction(auction_id: int, db_path: Path | None = None) -> dict[str, Any]:
 def auction_for_vehicle(vehicle_id: int, db_path: Path | None = None) -> dict[str, Any] | None:
     with get_conn(db_path) as conn:
         row = conn.execute(
-            "SELECT * FROM auctions WHERE vehicle_id = ? ORDER BY id DESC LIMIT 1",
+            """
+            SELECT * FROM auctions
+            WHERE vehicle_id = ? AND status != 'CANCELLED'
+            ORDER BY id DESC LIMIT 1
+            """,
             (vehicle_id,),
         ).fetchone()
     return _row(row)
@@ -913,6 +943,7 @@ def _finish_auction(conn, auction: dict[str, Any], created: str, db_path: Path |
         "UPDATE vehicles SET status = 'BIDDING_ENDED', updated_at = ? WHERE id = ?",
         (created, auction["vehicle_id"]),
     )
+    bump_live(conn)
     if winner_id:
         conn.execute(
             """
@@ -991,6 +1022,7 @@ def place_manual_bid(
         notify(buyer["user_id"], "BID_PLACED", "پیشنهاد ثبت شد", "", {"auction_id": auction_id, "amount": int(amount)}, db_path=db_path, conn=conn)
         bid = dict(conn.execute("SELECT * FROM bids WHERE id = ?", (bid_id,)).fetchone())
         auction = dict(conn.execute("SELECT * FROM auctions WHERE id = ?", (auction_id,)).fetchone())
+        bump_live(conn)
     return {"ok": True, "bid": bid, "auction": auction}
 
 
@@ -1054,6 +1086,7 @@ def set_auto_bid(
             ).fetchone()
         )
         limit["has_max"] = True
+        bump_live(conn)
     return {"ok": True, "auto_bid": limit, "auction": auction}
 
 
@@ -1175,11 +1208,39 @@ def buyer_auction_history(buyer_id: int, db_path: Path | None = None) -> dict[st
     }
 
 
+def cancel_auction(auction_id: int, db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
+    created = now_iso(now)
+    auction = get_auction(auction_id, db_path)
+    with get_conn(db_path) as conn:
+        vehicle = conn.execute("SELECT * FROM vehicles WHERE id = ?", (auction["vehicle_id"],)).fetchone()
+        if vehicle and vehicle["inspection_completed"] and vehicle["office_approved"]:
+            next_status = "READY_FOR_BIDDING"
+        elif vehicle and vehicle["inspection_completed"]:
+            next_status = "PENDING_OFFICE_APPROVAL"
+        else:
+            next_status = "APPOINTMENT_SCHEDULED"
+        conn.execute("UPDATE auctions SET status = 'CANCELLED', updated_at = ? WHERE id = ?", (created, auction_id))
+        conn.execute(
+            "UPDATE auto_bid_limits SET status = 'CANCELLED', updated_at = ? WHERE auction_id = ?",
+            (created, auction_id),
+        )
+        conn.execute(
+            """
+            UPDATE vehicles SET status = ?, published_for_bidding = 0, updated_at = ?
+            WHERE id = ?
+            """,
+            (next_status, created, auction["vehicle_id"]),
+        )
+        bump_live(conn)
+    return get_auction(auction_id, db_path)
+
+
 def set_auction_status(auction_id: int, status: str, db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
+    if status == "CANCELLED":
+        return cancel_auction(auction_id, db_path=db_path, now=now)
     created = now_iso(now)
     auction = get_auction(auction_id, db_path)
     vehicle_status = {
-        "CANCELLED": "CANCELLED",
         "ENDED": "BIDDING_ENDED",
         "ACTIVE": "BIDDING_ACTIVE",
         "SCHEDULED": "READY_FOR_BIDDING",
@@ -1188,6 +1249,7 @@ def set_auction_status(auction_id: int, status: str, db_path: Path | None = None
         conn.execute("UPDATE auctions SET status = ?, updated_at = ? WHERE id = ?", (status, created, auction_id))
         if vehicle_status:
             conn.execute("UPDATE vehicles SET status = ?, updated_at = ? WHERE id = ?", (vehicle_status, created, auction["vehicle_id"]))
+        bump_live(conn)
     return get_auction(auction_id, db_path)
 
 

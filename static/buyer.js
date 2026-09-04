@@ -80,12 +80,55 @@ function renderInspection(item) {
     </details>`;
 }
 
-async function refresh() {
+let liveRevision = 0;
+let liveTimer = null;
+let refreshing = false;
+
+function snapshotBids() {
+  const out = {};
+  document.querySelectorAll(".bid-amount").forEach((el) => {
+    out[el.getAttribute("data-id")] = { bid: el.value, auto: "" };
+  });
+  document.querySelectorAll(".auto-amount").forEach((el) => {
+    const id = el.getAttribute("data-auto");
+    out[id] = out[id] || { bid: "", auto: "" };
+    out[id].auto = el.value;
+  });
+  return out;
+}
+
+function restoreBids(saved) {
+  Object.entries(saved || {}).forEach(([id, values]) => {
+    const bid = document.querySelector(`.bid-amount[data-id="${id}"]`);
+    const auto = document.querySelector(`.auto-amount[data-auto="${id}"]`);
+    if (bid && values.bid) bid.value = values.bid;
+    if (auto && values.auto) auto.value = values.auto;
+  });
+}
+
+function startLive() {
+  if (liveTimer) return;
+  liveTimer = setInterval(async () => {
+    if (!token() || refreshing || document.hidden) return;
+    try {
+      const live = await api("/live");
+      if (live.revision !== liveRevision) {
+        liveRevision = live.revision;
+        await refresh({ live: true });
+      }
+    } catch (_error) {}
+  }, 1000);
+}
+
+async function refresh(options) {
   if (!token()) {
     $("auth-box").classList.remove("hidden");
     $("app-box").classList.add("hidden");
     return;
   }
+  if (refreshing) return;
+  refreshing = true;
+  const saved = snapshotBids();
   try {
     const me = await api("/buyers/me");
     $("auth-box").classList.add("hidden");
@@ -120,6 +163,7 @@ async function refresh() {
             </div></article>`;
         })
         .join("");
+      restoreBids(saved);
     }
     const appts = await api("/buyer/appointments");
     $("appts").className = appts.length ? "" : "empty";
@@ -128,12 +172,15 @@ async function refresh() {
       : "نوبتی نیست.";
     const hist = await api("/buyers/me/auctions");
     $("history").textContent = `فعال: ${(hist.active || []).length} · برنده: ${(hist.winning || []).length} · از دست رفته: ${(hist.lost || []).length}`;
+    startLive();
   } catch (error) {
     if (String(error.message).includes("وارد")) {
       localStorage.removeItem(tokenKey);
       $("auth-box").classList.remove("hidden");
       $("app-box").classList.add("hidden");
     }
+  } finally {
+    refreshing = false;
   }
 }
 

@@ -4,6 +4,9 @@ const token = () => localStorage.getItem(tokenKey) || "";
 const headers = () => ({ "Content-Type": "application/json", Authorization: "Bearer " + token() });
 
 let CATALOG = null;
+let liveRevision = 0;
+let liveTimer = null;
+let refreshing = false;
 
 async function api(path, options) {
   const response = await fetch(path, { ...(options || {}), headers: { ...headers(), ...((options && options.headers) || {}) } });
@@ -43,6 +46,10 @@ function optionHtml(options, selected) {
 
 function selectField(name, options, selected, extra = "") {
   return `<select name="${escapeHtml(name)}" ${extra}>${optionHtml(options, selected || "")}</select>`;
+}
+
+function activeAuction(car, auctions) {
+  return (auctions || []).find((item) => item.vehicle_id === car.id && item.status !== "CANCELLED");
 }
 
 function reportItems(car, categoryId) {
@@ -157,14 +164,60 @@ async function loadCatalog() {
   return CATALOG;
 }
 
-async function refresh() {
+function editingForm() {
+  const el = document.activeElement;
+  return el && (el.tagName === "INPUT" || el.tagName === "SELECT" || el.tagName === "TEXTAREA");
+}
+
+function startLive() {
+  if (liveTimer) return;
+  liveTimer = setInterval(async () => {
+    if (!token() || refreshing || document.hidden) return;
+    try {
+      const live = await api("/live");
+      if (live.revision !== liveRevision) {
+        liveRevision = live.revision;
+        await refresh({ live: true });
+      }
+    } catch (_error) {}
+  }, 1000);
+}
+
+async function refresh(options) {
+  const live = Boolean(options && options.live);
   if (!token()) {
     $("auth-box").classList.remove("hidden");
     $("app-box").classList.add("hidden");
     return;
   }
+  if (refreshing) return;
+  refreshing = true;
+  try {
   await loadCatalog();
   const dash = await api("/office/dashboard");
+  if (live && editingForm()) {
+    (dash.vehicles || []).forEach((car) => {
+      const card = document.querySelector(`[data-vehicle-id="${car.id}"]`);
+      if (!card) return;
+      const auction = activeAuction(car, dash.auctions);
+      const status = card.querySelector(".live-status");
+      if (status) status.textContent = `#${car.id} ${car.brand || "خودرو"} ${car.model || ""} — ${car.status}`;
+      const flags = card.querySelector(".live-flags");
+      if (flags) flags.textContent = `کارشناسی: ${car.inspection_completed ? "تمام" : "نه"} · تأیید: ${car.office_approved ? "بله" : "نه"} · انتشار: ${car.published_for_bidding ? "بله" : "نه"}`;
+      const auc = card.querySelector(".live-auction");
+      if (auc) auc.textContent = auction ? `مزایده ${auction.status} · فعلی ${money(auction.current_price)} · پایان ${auction.end_time || ""}` : "مزایده‌ای فعال نیست";
+      const cancelBtn = card.querySelector(".cancel-auc");
+      if (cancelBtn && (!auction || auction.status !== "ACTIVE")) cancelBtn.remove();
+    });
+    $("buyers").innerHTML = `<table class="appts"><thead><tr><th>خریدار</th><th>وضعیت</th><th></th></tr></thead><tbody>${(dash.buyers || [])
+      .map(
+        (row) => `<tr><td>${escapeHtml(row.business_name || row.email)} (#${row.id})</td><td>${escapeHtml(row.status)} / ${escapeHtml(row.verification_status)}</td>
+      <td><button class="start activate" data-id="${row.id}">فعال و تأیید</button>
+      <button class="ghost suspend" data-id="${row.id}">تعلیق</button></td></tr>`
+      )
+      .join("")}</tbody></table>`;
+    return;
+  }
   $("auth-box").classList.add("hidden");
   $("app-box").classList.remove("hidden");
   const vehicles = dash.vehicles || [];
@@ -179,19 +232,19 @@ async function refresh() {
     .join("")}</tbody></table>`;
   $("vehicles").innerHTML = vehicles
     .map((car) => {
-      const auction = (dash.auctions || []).find((item) => item.vehicle_id === car.id);
+      const auction = activeAuction(car, dash.auctions);
       const winner = (dash.winners || []).find((item) => auction && item.auction_id === auction.id);
-      return `<article class="card">
-        <h3>#${car.id} ${escapeHtml(car.brand || "خودرو")} ${escapeHtml(car.model || "")} — ${escapeHtml(car.status)}</h3>
-        <p>کارشناسی: ${car.inspection_completed ? "تمام" : "نه"} · تأیید: ${car.office_approved ? "بله" : "نه"} · انتشار: ${car.published_for_bidding ? "بله" : "نه"}</p>
-        ${auction ? `<p>مزایده ${escapeHtml(auction.status)} · فعلی ${money(auction.current_price)} · پایان ${escapeHtml(auction.end_time || "")}</p>` : ""}
+      return `<article class="card" data-vehicle-id="${car.id}">
+        <h3 class="live-status">#${car.id} ${escapeHtml(car.brand || "خودرو")} ${escapeHtml(car.model || "")} — ${escapeHtml(car.status)}</h3>
+        <p class="live-flags">کارشناسی: ${car.inspection_completed ? "تمام" : "نه"} · تأیید: ${car.office_approved ? "بله" : "نه"} · انتشار: ${car.published_for_bidding ? "بله" : "نه"}</p>
+        <p class="live-auction">${auction ? `مزایده ${escapeHtml(auction.status)} · فعلی ${money(auction.current_price)} · پایان ${escapeHtml(auction.end_time || "")}` : "مزایده‌ای فعال نیست"}</p>
         ${winner ? `<p>برنده خریدار ${winner.buyer_id} · ${money(winner.final_price)} · رزرو ${winner.reserve_met ? "تأمین" : "نه"} · ${escapeHtml(winner.status)}</p>` : ""}
         <div class="actions">
-          <button class="ghost inspect" data-id="${car.id}">شروع کارشناسی</button>
-          <button class="ghost approve" data-id="${car.id}">تأیید دفتر</button>
-          <button class="start publish" data-id="${car.id}">انتشار مزایده</button>
-          ${auction ? `<button class="ghost cancel-auc" data-id="${auction.id}">لغو مزایده</button>` : ""}
-          ${winner ? `<button class="start accept" data-id="${auction.id}">پذیرش برنده</button><button class="ghost reject" data-id="${auction.id}">رد برنده</button>` : ""}
+          <button class="ghost inspect" type="button" data-id="${car.id}">شروع کارشناسی</button>
+          <button class="ghost approve" type="button" data-id="${car.id}">تأیید دفتر</button>
+          <button class="start publish" type="button" data-id="${car.id}">انتشار مزایده</button>
+          ${auction && auction.status === "ACTIVE" ? `<button class="ghost cancel-auc" type="button" data-id="${auction.id}">لغو مزایده</button>` : ""}
+          ${winner ? `<button class="start accept" type="button" data-id="${auction.id}">پذیرش برنده</button><button class="ghost reject" type="button" data-id="${auction.id}">رد برنده</button>` : ""}
         </div>
         ${renderSpecs(car)}
         ${renderInspection(car)}
@@ -205,6 +258,10 @@ async function refresh() {
       <button class="ghost suspend" data-id="${row.id}">تعلیق</button></td></tr>`
     )
     .join("")}</tbody></table>`;
+  startLive();
+  } finally {
+    refreshing = false;
+  }
 }
 
 $("login-form").addEventListener("submit", async (event) => {

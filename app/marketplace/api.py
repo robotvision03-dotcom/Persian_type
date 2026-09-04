@@ -226,6 +226,12 @@ def buyer_appts(request: Request, authorization: str | None = Header(default=Non
     return svc.buyer_appointments(db(request))
 
 
+@router.get("/live")
+def live(request: Request, authorization: str | None = Header(default=None)) -> dict[str, int]:
+    current_user(request, authorization)
+    return svc.live_state(db(request))
+
+
 @router.get("/auctions")
 def auctions(request: Request, authorization: str | None = Header(default=None)) -> list[dict[str, Any]]:
     user = current_user(request, authorization)
@@ -418,7 +424,7 @@ def office_pause(auction_id: int, request: Request, authorization: str | None = 
 @router.post("/office/auctions/{auction_id}/cancel")
 def office_cancel(auction_id: int, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     user = staff_user(request, authorization)
-    return svc.set_auction_status(auction_id, "CANCELLED", db(request))
+    return svc.cancel_auction(auction_id, db(request))
 
 
 @router.get("/office/auctions/{auction_id}/bids")

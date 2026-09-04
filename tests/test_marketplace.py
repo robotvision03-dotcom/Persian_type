@@ -312,6 +312,41 @@ class SecurityTests(unittest.TestCase):
         self.assertGreater(match_score(vehicle, prefs), 80)
 
 
+class CancelAndLiveTests(unittest.TestCase):
+    def test_cancel_auction_resets_vehicle_and_hides_from_buyers(self):
+        tmp, path = _db()
+        with tmp:
+            when = datetime(2026, 9, 5, 9, 0, 0)
+            _appt, vehicle, auction = _pipeline(path, now=when, increment=100)
+            _, buyer = _buyer(path, "live@ex.com")
+            self.assertEqual(len(svc.buyer_visible_auctions(buyer, path, now=when)), 1)
+            cancelled = svc.cancel_auction(auction["id"], db_path=path, now=when)
+            self.assertEqual(cancelled["status"], "CANCELLED")
+            reset = svc.get_vehicle(vehicle["id"], path)
+            self.assertEqual(reset["status"], "READY_FOR_BIDDING")
+            self.assertEqual(reset["published_for_bidding"], 0)
+            self.assertIsNone(svc.auction_for_vehicle(vehicle["id"], path))
+            self.assertEqual(svc.buyer_visible_auctions(buyer, path, now=when), [])
+            with self.assertRaises(svc.MarketplaceError):
+                svc.place_manual_bid(auction["id"], buyer, 2000, db_path=path, now=when)
+
+    def test_live_revision_bumps_on_bid_and_register(self):
+        tmp, path = _db()
+        with tmp:
+            when = datetime(2026, 9, 5, 9, 0, 0)
+            start = svc.live_state(path)["revision"]
+            _appt, _vehicle, auction = _pipeline(path, now=when, increment=100)
+            after_publish = svc.live_state(path)["revision"]
+            self.assertGreater(after_publish, start)
+            _, buyer = _buyer(path, "live2@ex.com")
+            after_register = svc.live_state(path)["revision"]
+            self.assertGreater(after_register, after_publish)
+            svc.place_manual_bid(auction["id"], buyer, 1_300_000_000, db_path=path, now=when)
+            self.assertGreater(svc.live_state(path)["revision"], after_register)
+            svc.cancel_auction(auction["id"], db_path=path, now=when)
+            self.assertGreater(svc.live_state(path)["revision"], after_register)
+
+
 class InspectionCatalogTests(unittest.TestCase):
     def test_body_and_cabin_defaults(self):
         catalog = svc.inspection_catalog()
