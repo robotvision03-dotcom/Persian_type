@@ -5,6 +5,24 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
+INCREMENT_RATE_NUM = 5
+INCREMENT_RATE_DEN = 1000
+DEFAULT_MIN_INCREMENT = 10_000
+LEGACY_FLAT_INCREMENT = 5_000_000
+
+
+def effective_min_increment(min_increment: int | None) -> int:
+    stored = int(min_increment or DEFAULT_MIN_INCREMENT)
+    if stored >= LEGACY_FLAT_INCREMENT:
+        return DEFAULT_MIN_INCREMENT
+    return max(1, stored)
+
+
+def live_increment(current_price: int, min_increment: int | None = None) -> int:
+    """bid_increment = max(min_increment, current_price × 0.5%)."""
+    percent = (int(current_price) * INCREMENT_RATE_NUM + INCREMENT_RATE_DEN // 2) // INCREMENT_RATE_DEN
+    return max(effective_min_increment(min_increment), percent)
+
 
 def parse_dt(value: str | datetime | None) -> datetime:
     if value is None:
@@ -38,10 +56,10 @@ def resolve_price(
     return int(winner_id), max(int(starting_price), current)
 
 
-def minimum_next_bid(current_price: int, increment: int, has_bid: bool) -> int:
+def minimum_next_bid(current_price: int, increment: int | None, has_bid: bool) -> int:
     if not has_bid:
         return int(current_price)
-    return int(current_price) + int(increment)
+    return int(current_price) + live_increment(current_price, increment)
 
 
 def should_extend(
@@ -69,9 +87,10 @@ def reserve_met(current_price: int, reserve_price: int | None) -> bool:
 
 
 def public_auction_view(auction: dict[str, Any], increment: int | None = None) -> dict[str, Any]:
-    step = int(increment if increment is not None else auction.get("bid_increment") or 0)
-    has_winner = auction.get("current_winner_id") is not None
     current = int(auction.get("current_price") or 0)
+    floor = increment if increment is not None else auction.get("bid_increment")
+    step = live_increment(current, floor)
+    has_winner = auction.get("current_winner_id") is not None
     return {
         "id": auction["id"],
         "status": auction.get("status"),

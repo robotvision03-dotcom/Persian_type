@@ -49,6 +49,7 @@ async function refresh() {
             <p>سال ${item.year || "—"} · ${item.mileage ? item.mileage + " کیلومتر" : ""} · ${item.transmission || ""}</p>
             <p>کارشناسی: ${item.inspection_summary || "انجام شده"}</p>
             <p>پیشنهاد فعلی: ${money(auction.current_price)}</p>
+            <p>حداقل افزایش: ${money(auction.bid_increment)} (۰٫۵٪)</p>
             <p>حداقل بعدی: ${money(auction.minimum_next_bid)}</p>
             <p>پایان: ${auction.end_time || ""}</p>
             <div class="actions">

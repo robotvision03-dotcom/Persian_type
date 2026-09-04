@@ -75,7 +75,7 @@ class AutoBidBody(BaseModel):
 
 class PublishBody(BaseModel):
     duration_seconds: int = 1800
-    increment: int = 5_000_000
+    increment: int = 10_000
     participant_policy: str = "ALL_VERIFIED_BUYERS"
 
 

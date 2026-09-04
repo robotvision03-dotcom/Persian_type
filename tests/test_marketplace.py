@@ -153,9 +153,9 @@ class BiddingTests(unittest.TestCase):
             self.assertEqual(first["auction"]["current_winner_id"], a["id"])
             with self.assertRaises(svc.MarketplaceError):
                 svc.place_manual_bid(auction["id"], b, 1_301_000_000, db_path=path, now=when)
-            second = svc.place_manual_bid(auction["id"], b, 1_305_000_000, db_path=path, now=when)
+            second = svc.place_manual_bid(auction["id"], b, 1_306_500_000, db_path=path, now=when)
             self.assertEqual(second["auction"]["current_winner_id"], b["id"])
-            self.assertEqual(second["auction"]["current_price"], 1_305_000_000)
+            self.assertEqual(second["auction"]["current_price"], 1_306_500_000)
 
     def test_auto_bid_two_buyers(self):
         tmp, path = _db()
@@ -167,7 +167,7 @@ class BiddingTests(unittest.TestCase):
             svc.set_auto_bid(auction["id"], a, 1_400_000_000, db_path=path, now=when)
             result = svc.set_auto_bid(auction["id"], b, 1_350_000_000, db_path=path, now=when)
             self.assertEqual(result["auction"]["current_winner_id"], a["id"])
-            self.assertEqual(result["auction"]["current_price"], 1_355_000_000)
+            self.assertEqual(result["auction"]["current_price"], 1_356_500_000)
             self.assertNotIn("max_bid", result["auto_bid"])
             other = svc.my_auto_bid(auction["id"], a["id"], path)
             self.assertEqual(other["max_bid"], 1_400_000_000)
@@ -182,7 +182,7 @@ class BiddingTests(unittest.TestCase):
             svc.set_auto_bid(auction["id"], a, 1_400_000_000, db_path=path, now=when)
             result = svc.set_auto_bid(auction["id"], b, 1_450_000_000, db_path=path, now=when)
             self.assertEqual(result["auction"]["current_winner_id"], b["id"])
-            self.assertEqual(result["auction"]["current_price"], 1_405_000_000)
+            self.assertEqual(result["auction"]["current_price"], 1_406_500_000)
 
     def test_update_max_and_same_max(self):
         tmp, path = _db()

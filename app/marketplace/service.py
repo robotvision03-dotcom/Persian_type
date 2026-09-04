@@ -11,14 +11,22 @@ from typing import Any
 
 from ..booking import list_appointments
 from .db import get_conn, init_marketplace
-from .engine import extend_end, parse_dt, reserve_met, resolve_price, should_extend
+from .engine import (
+    DEFAULT_MIN_INCREMENT,
+    extend_end,
+    live_increment,
+    parse_dt,
+    reserve_met,
+    resolve_price,
+    should_extend,
+)
 from .matching import match_score
 from .privacy import buyer_can_see_vehicle, public_bid, public_vehicle, safe_appointment
 
 PBKDF_ROUNDS = 180_000
 SESSION_DAYS = 7
 RESET_HOURS = 1
-DEFAULT_INCREMENT = 5_000_000
+DEFAULT_INCREMENT = DEFAULT_MIN_INCREMENT
 DEFAULT_DURATION_SECONDS = 1800
 MATCH_THRESHOLD = 60
 STAFF = {
@@ -675,7 +683,8 @@ def _existing_request(conn, request_id: str | None) -> dict[str, Any] | None:
 
 def _apply_resolution(conn, auction: dict[str, Any], created: str) -> dict[str, Any]:
     maxes = collect_maxes(conn, auction["id"])
-    winner_id, price = resolve_price(int(auction["starting_price"]), int(auction["bid_increment"]), maxes)
+    step = live_increment(int(auction["current_price"]), auction.get("bid_increment"))
+    winner_id, price = resolve_price(int(auction["starting_price"]), step, maxes)
     previous_price = int(auction["current_price"])
     previous_winner = auction.get("current_winner_id")
     conn.execute(
@@ -798,7 +807,9 @@ def place_manual_bid(
             raise MarketplaceError("مزایده تمام شده است.", 409)
         _ensure_participant(conn, auction, buyer, created)
         has_winner = auction.get("current_winner_id") is not None
-        minimum = int(auction["current_price"]) if not has_winner else int(auction["current_price"]) + int(auction["bid_increment"])
+        current = int(auction["current_price"])
+        step = live_increment(current, auction.get("bid_increment"))
+        minimum = current if not has_winner else current + step
         if int(amount) < minimum:
             raise MarketplaceError(f"پیشنهاد باید حداقل {minimum} باشد.", 409)
         bid_id = _record_bid(conn, auction_id, buyer["id"], int(amount), "MANUAL", request_id, created)

@@ -1,6 +1,6 @@
 import unittest
 
-from app.marketplace.engine import reserve_met, resolve_price, should_extend
+from app.marketplace.engine import live_increment, minimum_next_bid, reserve_met, resolve_price, should_extend
 from datetime import datetime, timedelta
 
 
@@ -36,6 +36,13 @@ class ResolvePriceTests(unittest.TestCase):
         )
         self.assertEqual(winner, 1)
         self.assertEqual(price, 1_400_000_000)
+
+    def test_live_increment_is_half_percent(self):
+        self.assertEqual(live_increment(6_200_000, 10_000), 31_000)
+        self.assertEqual(minimum_next_bid(6_200_000, 5_000_000, True), 6_231_000)
+        self.assertEqual(live_increment(1_300_000_000, 10_000), 6_500_000)
+        self.assertEqual(live_increment(100_000, 10_000), 10_000)
+        self.assertEqual(minimum_next_bid(6_200_000, 10_000, False), 6_200_000)
 
     def test_reserve_and_sniping_window(self):
         self.assertTrue(reserve_met(200, 200))

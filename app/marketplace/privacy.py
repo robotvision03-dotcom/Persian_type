@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .engine import minimum_next_bid
+from .engine import live_increment, minimum_next_bid
 
 HIDDEN_VEHICLE_KEYS = (
     "customer_name",
@@ -72,14 +72,14 @@ def public_vehicle(vehicle: dict[str, Any], auction: dict[str, Any] | None = Non
         "photos": _photos(vehicle.get("photos")),
     }
     if auction:
-        increment = int(auction.get("bid_increment") or 0)
         current = int(auction.get("current_price") or 0)
+        increment = live_increment(current, auction.get("bid_increment"))
         has_winner = auction.get("current_winner_id") is not None
         payload["auction"] = {
             "id": auction["id"],
             "status": auction.get("status"),
             "current_price": current,
-            "minimum_next_bid": minimum_next_bid(current, increment, has_winner),
+            "minimum_next_bid": minimum_next_bid(current, auction.get("bid_increment"), has_winner),
             "bid_increment": increment,
             "end_time": auction.get("end_time"),
             "start_time": auction.get("start_time"),
