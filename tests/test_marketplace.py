@@ -370,6 +370,7 @@ class InspectionCatalogTests(unittest.TestCase):
             svc.approve_vehicle(vehicle["id"], db_path=path, now=when)
             self.assertEqual(svc.buyer_visible_auctions(buyer, path, now=when), [])
             auction = svc.publish_vehicle(vehicle["id"], increment=100, db_path=path, now=when)
+            self.assertEqual(auction["end_time"], (when + timedelta(seconds=60)).isoformat(timespec="seconds"))
             visible = svc.buyer_visible_auctions(buyer, path, now=when)
             self.assertEqual(len(visible), 1)
             item = visible[0]
