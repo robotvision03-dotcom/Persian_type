@@ -628,6 +628,25 @@ table.appts td {
   border-bottom: 1px solid var(--line);
 }
 
+table.appts tr.needs-call td {
+  background: rgba(179, 57, 45, 0.12);
+}
+
+.followup-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.followup-actions a.ghost {
+  text-decoration: none;
+  display: inline-flex;
+  justify-content: center;
+  font-size: 0.75rem;
+  padding: 6px 10px;
+}
+
 @media (max-width: 860px) {
   .workspace.dealership {
     grid-template-columns: 1fr;

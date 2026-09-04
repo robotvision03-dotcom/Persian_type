@@ -177,8 +177,8 @@ class DialogueManager:
         )
         session.live = False
         reply = (
-            f"{session.customer_name} عزیز، لینک تقویم نوبت‌های خالی را برایتان به واتساپ "
-            f"{session.phone} می‌فرستیم. روی لینک بزنید، وقت آزاد را از تقویم انتخاب کنید و نوبت ثبت شود."
+            f"{session.customer_name} عزیز، لینک تقویم را برایتان به واتساپ می‌فرستیم. "
+            "لطفاً وقت نوبت را از تقویم انتخاب کنید و ثبت را تأیید کنید. روز خوبی داشته باشید."
         )
         return self._reply(session, text, reply)
 
@@ -204,4 +204,5 @@ class DialogueManager:
             "hours": booking.hours_panel(db_path=self.db_path),
             "invite": session.invite,
             "phone": session.phone,
+            "end_call": session.phase == PHASE_AWAIT_CALENDAR and not session.live,
         }

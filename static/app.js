@@ -56,8 +56,11 @@ function addMsg(role, text, meta) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-function speakFa(text) {
-  if (!text || !window.speechSynthesis) return;
+function speakFa(text, onend) {
+  if (!text || !window.speechSynthesis) {
+    if (onend) onend();
+    return;
+  }
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "fa-IR";
@@ -65,7 +68,26 @@ function speakFa(text) {
   const voices = window.speechSynthesis.getVoices() || [];
   const persian = voices.find((voice) => (voice.lang || "").toLowerCase().startsWith("fa"));
   if (persian) utterance.voice = persian;
+  if (onend) {
+    utterance.onend = onend;
+    utterance.onerror = onend;
+  }
   window.speechSynthesis.speak(utterance);
+}
+
+function speakThen(text, onend) {
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    if (onend) onend();
+  };
+  const fallbackMs = Math.min(20000, 900 + String(text || "").length * 80);
+  const timer = setTimeout(finish, fallbackMs);
+  speakFa(text, () => {
+    clearTimeout(timer);
+    finish();
+  });
 }
 
 function setCallUi(live) {
@@ -92,7 +114,7 @@ function showInvite(invite) {
   const box = $("invite-box");
   box.classList.remove("hidden");
   $("invite-text").textContent =
-    `لینک تقویم به واتساپ ${invite.phone || "+989032901549"} ارسال می‌شود. مشتری روی لینک می‌زند و وقت خالی را از تقویم انتخاب می‌کند.`;
+    `لینک تقویم به واتساپ ${invite.phone || "+989032901549"} ارسال می‌شود. مشتری وقت را انتخاب و تأیید می‌کند. اگر نوبت نگیرد یادآوری می‌رود.`;
   if (invite.whatsapp_url) {
     $("wa-link").href = invite.whatsapp_url;
     window.open(invite.whatsapp_url, "_blank");
@@ -100,23 +122,28 @@ function showInvite(invite) {
   if (invite.calendar_url) $("cal-link").href = invite.calendar_url;
 }
 
+function finishCall(statusText) {
+  if (inCall) hangup(statusText);
+  else statusLine.textContent = statusText;
+}
+
 function applyTurn(payload, userText) {
   if (userText) addMsg("user", userText, "مشتری");
-  if (payload?.reply) {
-    addMsg("agent", payload.reply, "منشی");
-    speakFa(payload.reply);
-  }
+  if (payload?.reply) addMsg("agent", payload.reply, "منشی");
   if (payload?.appointment_id) loadAppts();
   if (payload?.hours?.date) selectedDate = payload.hours.date;
   loadCalendar();
+  loadFollowups();
   if (payload?.phase === "await_calendar") {
     showInvite(payload.invite);
-    if (inCall) hangup("لینک واتساپ ارسال شد");
-    else statusLine.textContent = "لینک واتساپ ارسال شد";
+    const done = () => finishCall("تماس تمام شد — لینک تقویم ارسال شد");
+    if (payload.reply) speakThen(payload.reply, done);
+    else done();
+    return;
   }
+  if (payload?.reply) speakFa(payload.reply);
   if (payload?.phase === "booked") {
-    if (inCall) hangup("نوبت ثبت شد");
-    else statusLine.textContent = "نوبت ثبت شد";
+    finishCall("نوبت ثبت شد");
   }
 }
 
@@ -268,6 +295,77 @@ async function loadAppts() {
 }
 
 $("refresh-list").addEventListener("click", loadAppts);
+
+const openedReminders = new Set();
+
+function renderFollowups(rows) {
+  const el = $("followups");
+  if (!el) return;
+  if (!rows.length) {
+    el.className = "empty";
+    el.textContent = "هنوز مشتری بدون نوبت نیست.";
+    return;
+  }
+  el.className = "";
+  el.innerHTML = `<table class="appts"><thead><tr><th>مشتری</th><th>خودرو</th><th>ثبت</th><th>وضعیت</th><th></th></tr></thead><tbody>${rows
+    .map((row) => {
+      const phone = row.phone || "";
+      const callHref = row.call_url || `tel:${phone}`;
+      return `<tr class="${row.needs_admin_call ? "needs-call" : ""}"><td>${escapeHtml(
+        row.customer_name
+      )}<br><small>${escapeHtml(phone)}</small></td><td>${escapeHtml(
+        `${row.car_name || ""} ${row.car_model || ""}`.trim()
+      )}</td><td>${escapeHtml(row.created_at || "")}</td><td>${escapeHtml(
+        row.followup_label || ""
+      )}</td><td class="followup-actions"><a class="ghost" href="${escapeHtml(
+        row.whatsapp_url || "#"
+      )}" target="_blank" rel="noopener" data-token="${escapeHtml(
+        row.token || ""
+      )}">یادآوری واتساپ</a><a class="ghost" href="${escapeHtml(callHref)}">تماس ادمین</a></td></tr>`;
+    })
+    .join("")}</tbody></table>`;
+}
+
+async function loadFollowups() {
+  const el = $("followups");
+  if (!el) return;
+  const rows = await fetch("/api/followups").then((r) => r.json());
+  renderFollowups(rows);
+}
+
+async function markReminderSent(token) {
+  if (!token) return;
+  await fetch(`/api/reminders/${encodeURIComponent(token)}/sent`, { method: "POST" });
+  await loadFollowups();
+}
+
+async function pollReminders() {
+  const due = await fetch("/api/reminders/due").then((r) => r.json());
+  for (const item of due) {
+    if (!item.token || openedReminders.has(item.token)) continue;
+    openedReminders.add(item.token);
+    if (item.whatsapp_url) window.open(item.whatsapp_url, "_blank");
+    await markReminderSent(item.token);
+  }
+}
+
+$("refresh-followups").addEventListener("click", () => {
+  loadFollowups();
+  pollReminders().catch(() => {});
+});
+
+$("followups").addEventListener("click", (event) => {
+  const link = event.target.closest("a[data-token]");
+  if (!link) return;
+  const token = link.getAttribute("data-token");
+  openedReminders.add(token);
+  markReminderSent(token).catch(() => {});
+});
+
+setInterval(() => {
+  pollReminders().catch(() => {});
+  loadFollowups().catch(() => {});
+}, 30000);
 
 function downsample(buffer, inRate, outRate) {
   if (inRate === outRate) return buffer;
@@ -456,6 +554,8 @@ async function boot() {
     applyState(payload);
     await loadCalendar();
     await loadAppts();
+    await loadFollowups();
+    pollReminders().catch(() => {});
   } catch (error) {
     statusLine.textContent = error.message;
     await loadCalendar();

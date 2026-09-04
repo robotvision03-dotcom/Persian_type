@@ -19,11 +19,14 @@ from .booking import (
     available_slots,
     book_appointment,
     book_invite,
+    due_reminders,
     get_invite,
     hours_panel,
     init_db,
     is_office_open,
     list_appointments,
+    list_unbooked_invites,
+    mark_reminder_sent,
     month_calendar,
     slot_times,
     whatsapp_send_url,
@@ -75,12 +78,32 @@ def attach_invite_urls(invite: dict[str, Any] | None, origin: str) -> dict[str, 
         f"سلام {invite['customer_name']} عزیز\n"
         f"برای بازدید و خرید {invite['car_name']} {invite['car_model']} "
         f"این لینک تقویم نوبت‌های خالی است:\n{calendar_url}\n"
-        "روی لینک بزنید و یک وقت آزاد انتخاب کنید."
+        "لطفاً وقت آزاد را انتخاب کنید و ثبت را تأیید کنید."
     )
     extra = dict(invite)
     extra["calendar_url"] = calendar_url
     extra["whatsapp_url"] = whatsapp_send_url(message, invite.get("phone"))
     extra["whatsapp_text"] = message
+    extra["call_url"] = f"tel:{invite.get('phone') or ''}"
+    return extra
+
+
+def attach_reminder_urls(invite: dict[str, Any] | None, origin: str) -> dict[str, Any] | None:
+    extra = attach_invite_urls(invite, origin)
+    if extra is None:
+        return None
+    calendar_url = extra["calendar_url"]
+    count = int(extra.get("reminder_count") or 0) + 1
+    message = (
+        f"سلام {invite['customer_name']} عزیز\n"
+        "یادآوری نوبت بازدید: هنوز وقت خود را از تقویم انتخاب و تأیید نکرده‌اید.\n"
+        f"برای {invite['car_name']} {invite['car_model']}:\n"
+        f"{calendar_url}\n"
+        "لطفاً وقت آزاد را انتخاب کنید و ثبت را تأیید کنید."
+    )
+    extra["whatsapp_url"] = whatsapp_send_url(message, invite.get("phone"))
+    extra["whatsapp_text"] = message
+    extra["reminder_number"] = count
     return extra
 
 
@@ -270,6 +293,32 @@ def get_names(q: str = "") -> dict[str, Any]:
 @app.get("/api/appointments")
 def get_appointments() -> list[dict[str, Any]]:
     return list_appointments(db_path=state.db_path)
+
+
+@app.get("/api/followups")
+def get_followups(request: Request) -> list[dict[str, Any]]:
+    origin = str(request.base_url).rstrip("/")
+    return [
+        attach_reminder_urls(row, origin) or row
+        for row in list_unbooked_invites(db_path=state.db_path)
+    ]
+
+
+@app.get("/api/reminders/due")
+def get_due_reminders(request: Request) -> list[dict[str, Any]]:
+    origin = str(request.base_url).rstrip("/")
+    return [
+        attach_reminder_urls(row, origin) or row
+        for row in due_reminders(db_path=state.db_path)
+    ]
+
+
+@app.post("/api/reminders/{token}/sent")
+def post_reminder_sent(token: str) -> dict[str, Any]:
+    invite = mark_reminder_sent(token, db_path=state.db_path)
+    if invite is None:
+        raise HTTPException(status_code=404, detail="این مشتری پیدا نشد.")
+    return invite
 
 
 @app.post("/api/book")

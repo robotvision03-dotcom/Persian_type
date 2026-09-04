@@ -65,7 +65,10 @@ def init_db(db_path: Path | None = None) -> None:
                 session_id TEXT,
                 created_at TEXT NOT NULL,
                 appointment_id INTEGER,
-                status TEXT NOT NULL DEFAULT 'pending'
+                status TEXT NOT NULL DEFAULT 'pending',
+                reminder_count INTEGER NOT NULL DEFAULT 0,
+                last_reminder_at TEXT,
+                next_reminder_at TEXT
             );
             """
         )
@@ -74,6 +77,31 @@ def init_db(db_path: Path | None = None) -> None:
             conn.execute("ALTER TABLE appointments ADD COLUMN phone TEXT")
         if "invite_token" not in columns:
             conn.execute("ALTER TABLE appointments ADD COLUMN invite_token TEXT")
+        invite_columns = {row[1] for row in conn.execute("PRAGMA table_info(booking_invites)")}
+        if "reminder_count" not in invite_columns:
+            conn.execute(
+                "ALTER TABLE booking_invites ADD COLUMN reminder_count INTEGER NOT NULL DEFAULT 0"
+            )
+        if "last_reminder_at" not in invite_columns:
+            conn.execute("ALTER TABLE booking_invites ADD COLUMN last_reminder_at TEXT")
+        if "next_reminder_at" not in invite_columns:
+            conn.execute("ALTER TABLE booking_invites ADD COLUMN next_reminder_at TEXT")
+        pending = conn.execute(
+            """
+            SELECT token, created_at, reminder_count
+            FROM booking_invites
+            WHERE status = 'pending'
+              AND (next_reminder_at IS NULL OR next_reminder_at = '')
+            """
+        ).fetchall()
+        for row in pending:
+            created = parse_when(row["created_at"])
+            nxt = next_reminder_time(created, int(row["reminder_count"] or 0))
+            if nxt is not None:
+                conn.execute(
+                    "UPDATE booking_invites SET next_reminder_at = ? WHERE token = ?",
+                    (nxt.isoformat(timespec="seconds"), row["token"]),
+                )
 
 
 def is_office_open(day: date) -> bool:
@@ -203,6 +231,28 @@ def month_calendar(jy: int | None = None, jm: int | None = None, db_path: Path |
 
 
 DEFAULT_WHATSAPP = "+989032901549"
+REMINDER_OFFSETS = (
+    timedelta(hours=1),
+    timedelta(hours=5),
+    timedelta(days=1),
+    timedelta(days=2),
+    timedelta(days=3),
+)
+MAX_REMINDERS = len(REMINDER_OFFSETS)
+
+
+def parse_when(value: datetime | str | None = None) -> datetime:
+    if value is None:
+        return datetime.now()
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(value)
+
+
+def next_reminder_time(created_at: datetime, reminder_count: int) -> datetime | None:
+    if reminder_count >= MAX_REMINDERS:
+        return None
+    return created_at + REMINDER_OFFSETS[reminder_count]
 
 
 def whatsapp_digits(phone: str | None = None) -> str:
@@ -216,6 +266,27 @@ def whatsapp_send_url(text: str, phone: str | None = None) -> str:
     return f"https://wa.me/{whatsapp_digits(phone)}?text={quote(text)}"
 
 
+def decorate_invite(item: dict[str, Any]) -> dict[str, Any]:
+    extra = dict(item)
+    token = extra["token"]
+    extra["calendar_path"] = f"/book/{token}"
+    count = int(extra.get("reminder_count") or 0)
+    status = extra.get("status") or "pending"
+    if status == "booked":
+        extra["followup_label"] = "نوبت ثبت شد"
+        extra["needs_admin_call"] = False
+    elif status == "stopped":
+        extra["followup_label"] = "یادآوری‌ها تمام شد — تماس ادمین"
+        extra["needs_admin_call"] = True
+    elif count == 0:
+        extra["followup_label"] = "منتظر انتخاب وقت"
+        extra["needs_admin_call"] = False
+    else:
+        extra["followup_label"] = f"{count} یادآوری ارسال شد"
+        extra["needs_admin_call"] = False
+    return extra
+
+
 def create_invite(
     customer_name: str,
     car_name: str,
@@ -224,21 +295,35 @@ def create_invite(
     session_id: str = "",
     phone: str | None = None,
     db_path: Path | None = None,
+    now: datetime | str | None = None,
 ) -> dict[str, Any]:
     import secrets
 
     init_db(db_path)
     token = secrets.token_urlsafe(8).replace("_", "").replace("-", "")[:12]
-    created = datetime.now().isoformat(timespec="seconds")
+    created_dt = parse_when(now)
+    created = created_dt.isoformat(timespec="seconds")
+    nxt = next_reminder_time(created_dt, 0)
     number = phone or DEFAULT_WHATSAPP
     with get_conn(db_path) as conn:
         conn.execute(
             """
             INSERT INTO booking_invites
-                (token, customer_name, car_name, car_model, km, phone, session_id, created_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                (token, customer_name, car_name, car_model, km, phone, session_id,
+                 created_at, status, reminder_count, next_reminder_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?)
             """,
-            (token, customer_name, car_name, car_model, km, number, session_id, created),
+            (
+                token,
+                customer_name,
+                car_name,
+                car_model,
+                km,
+                number,
+                session_id,
+                created,
+                nxt.isoformat(timespec="seconds") if nxt else None,
+            ),
         )
     return get_invite(token, db_path)
 
@@ -249,9 +334,71 @@ def get_invite(token: str, db_path: Path | None = None) -> dict[str, Any] | None
         row = conn.execute("SELECT * FROM booking_invites WHERE token = ?", (token,)).fetchone()
     if row is None:
         return None
-    item = dict(row)
-    item["calendar_path"] = f"/book/{token}"
-    return item
+    return decorate_invite(dict(row))
+
+
+def list_unbooked_invites(db_path: Path | None = None) -> list[dict[str, Any]]:
+    init_db(db_path)
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM booking_invites
+            WHERE status IN ('pending', 'stopped')
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+    return [decorate_invite(dict(row)) for row in rows]
+
+
+def due_reminders(
+    now: datetime | str | None = None, db_path: Path | None = None
+) -> list[dict[str, Any]]:
+    when = parse_when(now)
+    init_db(db_path)
+    stamp = when.isoformat(timespec="seconds")
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM booking_invites
+            WHERE status = 'pending'
+              AND next_reminder_at IS NOT NULL
+              AND next_reminder_at <= ?
+            ORDER BY next_reminder_at ASC
+            """,
+            (stamp,),
+        ).fetchall()
+    return [decorate_invite(dict(row)) for row in rows]
+
+
+def mark_reminder_sent(
+    token: str,
+    now: datetime | str | None = None,
+    db_path: Path | None = None,
+) -> dict[str, Any] | None:
+    invite = get_invite(token, db_path)
+    if invite is None or invite["status"] != "pending":
+        return invite
+    when = parse_when(now)
+    created = parse_when(invite["created_at"])
+    count = int(invite.get("reminder_count") or 0) + 1
+    nxt = next_reminder_time(created, count)
+    status = "stopped" if nxt is None else "pending"
+    with get_conn(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE booking_invites
+            SET reminder_count = ?, last_reminder_at = ?, next_reminder_at = ?, status = ?
+            WHERE token = ? AND status = 'pending'
+            """,
+            (
+                count,
+                when.isoformat(timespec="seconds"),
+                nxt.isoformat(timespec="seconds") if nxt else None,
+                status,
+                token,
+            ),
+        )
+    return get_invite(token, db_path)
 
 
 def book_invite(token: str, day: str, time: str, db_path: Path | None = None) -> dict[str, Any]:
@@ -273,7 +420,11 @@ def book_invite(token: str, day: str, time: str, db_path: Path | None = None) ->
     )
     with get_conn(db_path) as conn:
         conn.execute(
-            "UPDATE booking_invites SET status = 'booked', appointment_id = ? WHERE token = ?",
+            """
+            UPDATE booking_invites
+            SET status = 'booked', appointment_id = ?, next_reminder_at = NULL
+            WHERE token = ?
+            """,
             (appt_id, token),
         )
     slot_day = date.fromisoformat(day)
