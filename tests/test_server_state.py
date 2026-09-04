@@ -87,6 +87,10 @@ class AppStateTests(unittest.TestCase):
         self.assertNotIn('id="start-btn"', html)
         self.assertIn("ثبت‌شده بدون نوبت", html)
         self.assertIn('id="followups"', html)
+        self.assertNotIn("ارسال در واتساپ", html)
+        self.assertNotIn("باز کردن تقویم مشتری", html)
+        self.assertNotIn('id="wa-link"', html)
+        self.assertNotIn('id="cal-link"', html)
 
     @unittest.skipUnless(TestClient, "httpx is required for the live websocket test")
     def test_live_endpoint_asks_next_question_immediately(self):
@@ -113,23 +117,35 @@ class AppStateTests(unittest.TestCase):
 
     @unittest.skipUnless(TestClient, "httpx is required for the followups API test")
     def test_followups_list_unbooked_after_call(self):
+        sent = {
+            "ok": True,
+            "from": "+989032901549",
+            "to": "+989032901549",
+            "provider": "test",
+            "error": "",
+        }
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             make_shenava_dir(root)
             reset_state(root, db_path=root / "book.sqlite")
             client = TestClient(app)
-            client.post("/api/call/start", json={"session_id": "s1"})
-            client.post("/api/call/turn", json={"session_id": "s1", "text": "پژو"})
-            client.post("/api/call/turn", json={"session_id": "s1", "text": "پارس"})
-            client.post("/api/call/turn", json={"session_id": "s1", "text": "۸۰۰۰۰"})
-            turn = client.post("/api/call/turn", json={"session_id": "s1", "text": "علی رضایی"}).json()
+            with patch("app.server.send_text", return_value=sent):
+                client.post("/api/call/start", json={"session_id": "s1"})
+                client.post("/api/call/turn", json={"session_id": "s1", "text": "پژو"})
+                client.post("/api/call/turn", json={"session_id": "s1", "text": "پارس"})
+                client.post("/api/call/turn", json={"session_id": "s1", "text": "۸۰۰۰۰"})
+                turn = client.post("/api/call/turn", json={"session_id": "s1", "text": "علی رضایی"}).json()
             self.assertTrue(turn["end_call"])
             self.assertIn("روز خوبی", turn["reply"])
+            self.assertTrue(turn["invite"]["whatsapp_sent"]["ok"])
+            self.assertEqual(turn["invite"]["from_number"], "+989032901549")
+            self.assertEqual(turn["invite"]["phone"], "+989032901549")
             rows = client.get("/api/followups").json()
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["customer_name"], "علی رضایی")
             self.assertEqual(rows[0]["status"], "pending")
-            self.assertIn("whatsapp_url", rows[0])
+            self.assertEqual(rows[0]["from_number"], "+989032901549")
+            self.assertNotIn("whatsapp_url", rows[0])
             self.assertEqual(client.get("/api/reminders/due").json(), [])
 
 

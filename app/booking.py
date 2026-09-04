@@ -68,7 +68,11 @@ def init_db(db_path: Path | None = None) -> None:
                 status TEXT NOT NULL DEFAULT 'pending',
                 reminder_count INTEGER NOT NULL DEFAULT 0,
                 last_reminder_at TEXT,
-                next_reminder_at TEXT
+                next_reminder_at TEXT,
+                public_origin TEXT,
+                whatsapp_status TEXT,
+                whatsapp_error TEXT,
+                link_sent_at TEXT
             );
             """
         )
@@ -86,6 +90,14 @@ def init_db(db_path: Path | None = None) -> None:
             conn.execute("ALTER TABLE booking_invites ADD COLUMN last_reminder_at TEXT")
         if "next_reminder_at" not in invite_columns:
             conn.execute("ALTER TABLE booking_invites ADD COLUMN next_reminder_at TEXT")
+        for name, spec in (
+            ("public_origin", "TEXT"),
+            ("whatsapp_status", "TEXT"),
+            ("whatsapp_error", "TEXT"),
+            ("link_sent_at", "TEXT"),
+        ):
+            if name not in invite_columns:
+                conn.execute(f"ALTER TABLE booking_invites ADD COLUMN {name} {spec}")
         pending = conn.execute(
             """
             SELECT token, created_at, reminder_count
@@ -278,6 +290,12 @@ def decorate_invite(item: dict[str, Any]) -> dict[str, Any]:
     elif status == "stopped":
         extra["followup_label"] = "یادآوری‌ها تمام شد — تماس ادمین"
         extra["needs_admin_call"] = True
+    elif extra.get("whatsapp_status") == "failed":
+        extra["followup_label"] = "ارسال واتساپ ناموفق — تماس ادمین"
+        extra["needs_admin_call"] = True
+    elif extra.get("whatsapp_status") == "sent" and count == 0:
+        extra["followup_label"] = "لینک ارسال شد — منتظر انتخاب وقت"
+        extra["needs_admin_call"] = False
     elif count == 0:
         extra["followup_label"] = "منتظر انتخاب وقت"
         extra["needs_admin_call"] = False
@@ -285,6 +303,32 @@ def decorate_invite(item: dict[str, Any]) -> dict[str, Any]:
         extra["followup_label"] = f"{count} یادآوری ارسال شد"
         extra["needs_admin_call"] = False
     return extra
+
+
+def record_invite_send(
+    token: str,
+    origin: str,
+    result: dict[str, Any] | None,
+    db_path: Path | None = None,
+) -> dict[str, Any] | None:
+    init_db(db_path)
+    when = datetime.now().isoformat(timespec="seconds")
+    payload = result or {}
+    status = "sent" if payload.get("ok") else "failed"
+    base = (origin or "").rstrip("/") or None
+    with get_conn(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE booking_invites
+            SET public_origin = COALESCE(?, public_origin),
+                whatsapp_status = ?,
+                whatsapp_error = ?,
+                link_sent_at = COALESCE(link_sent_at, ?)
+            WHERE token = ?
+            """,
+            (base, status, payload.get("error"), when, token),
+        )
+    return get_invite(token, db_path)
 
 
 def create_invite(

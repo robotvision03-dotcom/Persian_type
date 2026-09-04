@@ -112,14 +112,17 @@ async function fetchState() {
 function showInvite(invite) {
   if (!invite) return;
   const box = $("invite-box");
+  if (!box) return;
   box.classList.remove("hidden");
-  $("invite-text").textContent =
-    `لینک تقویم به واتساپ ${invite.phone || "+989032901549"} ارسال می‌شود. مشتری وقت را انتخاب و تأیید می‌کند. اگر نوبت نگیرد یادآوری می‌رود.`;
-  if (invite.whatsapp_url) {
-    $("wa-link").href = invite.whatsapp_url;
-    window.open(invite.whatsapp_url, "_blank");
+  const from = invite.from_number || "+989032901549";
+  const sent = invite.whatsapp_sent || {};
+  if (sent.ok) {
+    $("invite-text").textContent = `لینک تقویم از واتساپ ${from} برای مشتری ارسال شد.`;
+  } else if (sent.error) {
+    $("invite-text").textContent = `ارسال خودکار واتساپ از ${from} انجام نشد. ${sent.error}`;
+  } else {
+    $("invite-text").textContent = `لینک تقویم از واتساپ ${from} برای مشتری ارسال شد.`;
   }
-  if (invite.calendar_url) $("cal-link").href = invite.calendar_url;
 }
 
 function finishCall(statusText) {
@@ -296,8 +299,6 @@ async function loadAppts() {
 
 $("refresh-list").addEventListener("click", loadAppts);
 
-const openedReminders = new Set();
-
 function renderFollowups(rows) {
   const el = $("followups");
   if (!el) return;
@@ -318,10 +319,8 @@ function renderFollowups(rows) {
       )}</td><td>${escapeHtml(row.created_at || "")}</td><td>${escapeHtml(
         row.followup_label || ""
       )}</td><td class="followup-actions"><a class="ghost" href="${escapeHtml(
-        row.whatsapp_url || "#"
-      )}" target="_blank" rel="noopener" data-token="${escapeHtml(
-        row.token || ""
-      )}">یادآوری واتساپ</a><a class="ghost" href="${escapeHtml(callHref)}">تماس ادمین</a></td></tr>`;
+        callHref
+      )}">تماس ادمین</a></td></tr>`;
     })
     .join("")}</tbody></table>`;
 }
@@ -333,37 +332,9 @@ async function loadFollowups() {
   renderFollowups(rows);
 }
 
-async function markReminderSent(token) {
-  if (!token) return;
-  await fetch(`/api/reminders/${encodeURIComponent(token)}/sent`, { method: "POST" });
-  await loadFollowups();
-}
-
-async function pollReminders() {
-  const due = await fetch("/api/reminders/due").then((r) => r.json());
-  for (const item of due) {
-    if (!item.token || openedReminders.has(item.token)) continue;
-    openedReminders.add(item.token);
-    if (item.whatsapp_url) window.open(item.whatsapp_url, "_blank");
-    await markReminderSent(item.token);
-  }
-}
-
-$("refresh-followups").addEventListener("click", () => {
-  loadFollowups();
-  pollReminders().catch(() => {});
-});
-
-$("followups").addEventListener("click", (event) => {
-  const link = event.target.closest("a[data-token]");
-  if (!link) return;
-  const token = link.getAttribute("data-token");
-  openedReminders.add(token);
-  markReminderSent(token).catch(() => {});
-});
+$("refresh-followups").addEventListener("click", loadFollowups);
 
 setInterval(() => {
-  pollReminders().catch(() => {});
   loadFollowups().catch(() => {});
 }, 30000);
 
@@ -555,7 +526,6 @@ async function boot() {
     await loadCalendar();
     await loadAppts();
     await loadFollowups();
-    pollReminders().catch(() => {});
   } catch (error) {
     statusLine.textContent = error.message;
     await loadCalendar();

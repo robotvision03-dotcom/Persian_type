@@ -90,7 +90,7 @@ class BookingTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["customer_name"], "علی رضایی")
             self.assertEqual(rows[0]["status"], "pending")
-            self.assertEqual(rows[0]["followup_label"], "منتظر انتخاب وقت")
+            self.assertIn("منتظر انتخاب وقت", rows[0]["followup_label"])
 
     def test_reminders_fire_then_stop_after_five(self):
         with tempfile.TemporaryDirectory() as tmp:

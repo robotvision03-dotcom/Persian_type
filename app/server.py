@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import threading
+import time
+from datetime import date
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -28,8 +31,8 @@ from .booking import (
     list_unbooked_invites,
     mark_reminder_sent,
     month_calendar,
+    record_invite_send,
     slot_times,
-    whatsapp_send_url,
 )
 from .cars import catalog_payload, match_vehicle
 from .iranian_names import match_person_name, name_catalog_counts
@@ -37,7 +40,7 @@ from .dialogue import DialogueManager
 from .discovery import ModelInfo, find_models_dir, find_shenava_ctc, scan_models
 from .engines import Engine, TranscriptionError, load_engine
 from .jalali import to_jalali
-from datetime import date
+from .whatsapp import attach_message, send_text
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -70,41 +73,41 @@ class InviteBookBody(BaseModel):
 
 
 def attach_invite_urls(invite: dict[str, Any] | None, origin: str) -> dict[str, Any] | None:
-    if not invite:
-        return None
-    base = (origin or "").rstrip("/")
-    calendar_url = f"{base}{invite.get('calendar_path') or '/book/' + invite['token']}"
-    message = (
-        f"سلام {invite['customer_name']} عزیز\n"
-        f"برای بازدید و خرید {invite['car_name']} {invite['car_model']} "
-        f"این لینک تقویم نوبت‌های خالی است:\n{calendar_url}\n"
-        "لطفاً وقت آزاد را انتخاب کنید و ثبت را تأیید کنید."
-    )
-    extra = dict(invite)
-    extra["calendar_url"] = calendar_url
-    extra["whatsapp_url"] = whatsapp_send_url(message, invite.get("phone"))
-    extra["whatsapp_text"] = message
-    extra["call_url"] = f"tel:{invite.get('phone') or ''}"
-    return extra
+    return attach_message(invite, origin, kind="invite")
 
 
 def attach_reminder_urls(invite: dict[str, Any] | None, origin: str) -> dict[str, Any] | None:
-    extra = attach_invite_urls(invite, origin)
+    return attach_message(invite, origin, kind="reminder")
+
+
+def deliver_whatsapp(
+    invite: dict[str, Any] | None,
+    origin: str,
+    kind: str = "invite",
+    db_path: Path | None = None,
+) -> dict[str, Any] | None:
+    extra = attach_message(invite, origin, kind=kind)
     if extra is None:
         return None
-    calendar_url = extra["calendar_url"]
-    count = int(extra.get("reminder_count") or 0) + 1
-    message = (
-        f"سلام {invite['customer_name']} عزیز\n"
-        "یادآوری نوبت بازدید: هنوز وقت خود را از تقویم انتخاب و تأیید نکرده‌اید.\n"
-        f"برای {invite['car_name']} {invite['car_model']}:\n"
-        f"{calendar_url}\n"
-        "لطفاً وقت آزاد را انتخاب کنید و ثبت را تأیید کنید."
-    )
-    extra["whatsapp_url"] = whatsapp_send_url(message, invite.get("phone"))
-    extra["whatsapp_text"] = message
-    extra["reminder_number"] = count
+    result = send_text(extra.get("phone"), extra["whatsapp_text"])
+    extra["whatsapp_sent"] = result
+    record_invite_send(extra["token"], origin, result, db_path=db_path)
     return extra
+
+
+def process_due_reminders(
+    now=None,
+    origin: str = "",
+    db_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for invite in due_reminders(now=now, db_path=db_path):
+        extra = deliver_whatsapp(invite, origin or invite.get("public_origin") or "", kind="reminder", db_path=db_path)
+        if extra is None:
+            continue
+        mark_reminder_sent(invite["token"], now=now, db_path=db_path)
+        out.append(extra)
+    return out
 
 
 class AppState:
@@ -233,7 +236,7 @@ def call_turn(body: TurnBody, request: Request) -> dict[str, Any]:
     payload["session_id"] = body.session_id
     origin = str(request.base_url).rstrip("/")
     if payload.get("invite"):
-        payload["invite"] = attach_invite_urls(payload["invite"], origin)
+        payload["invite"] = deliver_whatsapp(payload["invite"], origin, db_path=state.db_path)
     return payload
 
 
@@ -321,6 +324,13 @@ def post_reminder_sent(token: str) -> dict[str, Any]:
     return invite
 
 
+@app.post("/api/reminders/tick")
+def post_reminders_tick(request: Request) -> dict[str, Any]:
+    origin = str(request.base_url).rstrip("/")
+    sent = process_due_reminders(origin=origin, db_path=state.db_path)
+    return {"ok": True, "sent": len(sent), "items": sent}
+
+
 @app.post("/api/book")
 def post_book(body: BookBody) -> dict[str, Any]:
     try:
@@ -384,7 +394,9 @@ async def stream_call(websocket: WebSocket) -> None:
             if origin.startswith("ws"):
                 origin = "http" + origin[2:]
             turn = dict(turn)
-            turn["invite"] = attach_invite_urls(turn["invite"], origin.rstrip("/"))
+            turn["invite"] = deliver_whatsapp(
+                turn["invite"], origin.rstrip("/"), db_path=state.db_path
+            )
         await websocket.send_json({"type": "assistant", "text": text_out, "turn": turn})
 
     try:
@@ -469,3 +481,17 @@ def index() -> FileResponse:
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+def _reminder_loop() -> None:
+    while True:
+        time.sleep(60)
+        try:
+            origin = (os.environ.get("PUBLIC_BASE_URL") or "").rstrip("/")
+            process_due_reminders(origin=origin, db_path=state.db_path)
+        except Exception:
+            continue
+
+
+if os.environ.get("DISABLE_WHATSAPP_WORKER") != "1":
+    threading.Thread(target=_reminder_loop, name="whatsapp-followups", daemon=True).start()
