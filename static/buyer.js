@@ -137,16 +137,15 @@ async function refresh(options) {
     const buyerName = buyer.contact_person || buyer.business_name || me.user.email;
     $("who").textContent = buyerName;
     $("account-line").textContent = `${buyerName} وارد شده است — وضعیت ${buyer.status || ""} / تأیید ${buyer.verification_status || ""}`;
-    const profile = $("profile-card");
-    if (profile) {
-      profile.innerHTML = [
-        specLine("نام خریدار", buyer.contact_person),
-        specLine("شناسه خریدار", buyer.id ? "#" + buyer.id : ""),
-        specLine("کد ملی", buyer.national_id),
-        specLine("تلفن", buyer.phone),
-        specLine("ایمیل", buyer.email || me.user.email),
-        specLine("کسب‌وکار", buyer.business_name),
-      ].join("");
+    const profileForm = $("profile-form");
+    if (profileForm && !(options && options.live && profileForm.contains(document.activeElement))) {
+      profileForm.contact_person.value = buyer.contact_person || "";
+      profileForm.national_id.value = buyer.national_id || "";
+      profileForm.phone.value = buyer.phone || "";
+      profileForm.email.value = buyer.email || me.user.email || "";
+      profileForm.business_name.value = buyer.business_name || "";
+      profileForm.city.value = buyer.city || "";
+      profileForm.address.value = buyer.address || "";
     }
     const auctions = await api("/auctions");
     const box = $("auctions");
@@ -229,6 +228,30 @@ $("register-btn").addEventListener("click", async () => {
     $("auth-msg").textContent = "ثبت شد. دفتر باید حساب را فعال کند؛ بعد ورود کنید.";
   } catch (error) {
     $("auth-msg").textContent = error.message;
+  }
+});
+
+$("profile-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const msg = $("profile-msg");
+  try {
+    await api("/buyers/me", {
+      method: "PUT",
+      body: JSON.stringify({
+        contact_person: form.get("contact_person") || "",
+        national_id: form.get("national_id") || "",
+        phone: form.get("phone") || "",
+        email: form.get("email") || "",
+        business_name: form.get("business_name") || "",
+        city: form.get("city") || "",
+        address: form.get("address") || "",
+      }),
+    });
+    if (msg) msg.textContent = "پروفایل ذخیره شد.";
+    refresh();
+  } catch (error) {
+    if (msg) msg.textContent = error.message;
   }
 });
 

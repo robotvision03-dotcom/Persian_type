@@ -281,6 +281,9 @@ def require_staff(user: dict[str, Any]) -> None:
 
 
 def update_buyer_profile(buyer_id: int, fields: dict[str, Any], db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
+    incoming = dict(fields or {})
+    if incoming.get("full_name") and "contact_person" not in incoming:
+        incoming["contact_person"] = incoming.get("full_name")
     allowed = {
         "business_name",
         "contact_person",
@@ -292,7 +295,7 @@ def update_buyer_profile(buyer_id: int, fields: dict[str, Any], db_path: Path | 
         "dealer_type",
         "tax_id",
     }
-    updates = {key: fields[key] for key in allowed if key in fields}
+    updates = {key: incoming[key] for key in allowed if key in incoming}
     if "contact_person" in updates or "phone" in updates or "national_id" in updates:
         current = get_buyer_profile(buyer_id, db_path) or {}
         name, phone, national_id = normalize_buyer_identity(
@@ -312,10 +315,24 @@ def update_buyer_profile(buyer_id: int, fields: dict[str, Any], db_path: Path | 
         if profile is None:
             raise MarketplaceError("پروفایل پیدا نشد.", 404)
         return profile
+    if "email" in updates:
+        clean = str(updates["email"] or "").lower().strip()
+        if not clean or "@" not in clean:
+            raise MarketplaceError("ایمیل معتبر نیست.", 400)
+        updates["email"] = clean
+        current = get_buyer_profile(buyer_id, db_path) or {}
+        other = user_by_email(clean, db_path)
+        if other and other["id"] != current.get("user_id"):
+            raise MarketplaceError("این ایمیل قبلاً ثبت شده است.", 409)
     updates["updated_at"] = now_iso(now)
     sets = ", ".join(f"{key} = ?" for key in updates)
     with get_conn(db_path) as conn:
         conn.execute(f"UPDATE buyer_profiles SET {sets} WHERE id = ?", (*updates.values(), buyer_id))
+        if "email" in updates:
+            profile = conn.execute("SELECT user_id FROM buyer_profiles WHERE id = ?", (buyer_id,)).fetchone()
+            if profile:
+                conn.execute("UPDATE users SET email = ? WHERE id = ?", (updates["email"], profile["user_id"]))
+        bump_live(conn)
     profile = get_buyer_profile(buyer_id, db_path)
     if profile is None:
         raise MarketplaceError("پروفایل پیدا نشد.", 404)

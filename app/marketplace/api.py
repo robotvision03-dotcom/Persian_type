@@ -544,6 +544,17 @@ def office_buyer_status(buyer_id: int, body: BuyerStatusBody, request: Request, 
     return svc.set_buyer_status(buyer_id, body.status, body.verification_status, db(request))
 
 
+@router.put("/office/buyers/{buyer_id}")
+def office_edit_buyer(buyer_id: int, body: dict[str, Any], request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    staff_user(request, authorization)
+    if svc.get_buyer_profile(buyer_id, db(request)) is None:
+        raise HTTPException(status_code=404, detail="خریدار پیدا نشد.")
+    try:
+        return svc.update_buyer_profile(buyer_id, body, db(request))
+    except svc.MarketplaceError as extra:
+        raise wrap(extra) from extra
+
+
 @router.get("/buyers/{buyer_id}")
 def other_buyer(buyer_id: int, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     user = current_user(request, authorization)

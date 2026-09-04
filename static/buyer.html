@@ -6,8 +6,8 @@
     <title>پورتال خریدار</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=15" />
-    <link rel="stylesheet" href="/static/portal.css?v=15" />
+    <link rel="stylesheet" href="/static/styles.css?v=17" />
+    <link rel="stylesheet" href="/static/portal.css?v=17" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -46,7 +46,19 @@
             <button class="ghost" id="logout-btn" type="button">خروج</button>
           </div>
           <p id="account-line" class="hint"></p>
-          <div id="profile-card" class="spec-readout"></div>
+          <form id="profile-form" class="vehicle-form">
+            <h4>ویرایش پروفایل</h4>
+            <label class="spec-field"><span>نام خریدار</span><input name="contact_person" required /></label>
+            <label class="spec-field"><span>کد ملی</span><input name="national_id" inputmode="numeric" /></label>
+            <label class="spec-field"><span>تلفن</span><input name="phone" type="tel" /></label>
+            <label class="spec-field"><span>ایمیل</span><input name="email" type="email" /></label>
+            <label class="spec-field"><span>کسب‌وکار</span><input name="business_name" /></label>
+            <label class="spec-field"><span>شهر</span><input name="city" /></label>
+            <label class="spec-field wide"><span>نشانی</span><input name="address" /></label>
+            <p class="hint">شناسه خریدار بعد از ثبت عوض نمی‌شود.</p>
+            <button class="start" type="submit">ذخیره پروفایل</button>
+            <p id="profile-msg" class="hint"></p>
+          </form>
         </section>
         <section class="panel">
           <h2>مزایده‌های فعال</h2>
@@ -62,6 +74,6 @@
         </section>
       </div>
     </main>
-    <script src="/static/buyer.js?v=15"></script>
+    <script src="/static/buyer.js?v=17"></script>
   </body>
 </html>

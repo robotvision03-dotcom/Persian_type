@@ -97,8 +97,14 @@ class AuthTests(unittest.TestCase):
         tmp, path = _db()
         with tmp:
             session, buyer = _buyer(path, "a@ex.com")
-            updated = svc.update_buyer_profile(buyer["id"], {"city": "تهران", "business_name": "نمایشگاه الف"}, db_path=path)
+            updated = svc.update_buyer_profile(
+                buyer["id"],
+                {"city": "تهران", "business_name": "نمایشگاه الف", "full_name": "مریم احمدی", "phone": "09123334455"},
+                db_path=path,
+            )
             self.assertEqual(updated["city"], "تهران")
+            self.assertEqual(updated["contact_person"], "مریم احمدی")
+            self.assertEqual(updated["phone"], "09123334455")
             svc.set_buyer_status(buyer["id"], status="SUSPENDED", db_path=path)
             frozen = svc.get_buyer_profile(buyer["id"], path)
             self.assertEqual(frozen["status"], "SUSPENDED")
@@ -520,9 +526,25 @@ class MarketplaceApiTests(unittest.TestCase):
         self.assertEqual(me["buyer"]["phone"], "09121234567")
         self.assertEqual(me["buyer"]["national_id"], "0012345678")
         self.assertTrue(me["buyer"]["id"])
+        buyer_id = me["buyer"]["id"]
+        edited = client.put(
+            "/buyers/me",
+            json={"contact_person": "سارا محمدی", "phone": "09120001111", "city": "اصفهان"},
+            headers={"Authorization": "Bearer " + token},
+        ).json()
+        self.assertEqual(edited["contact_person"], "سارا محمدی")
+        self.assertEqual(edited["city"], "اصفهان")
         office = client.post("/auth/login", json={"email": "office@center.local", "password": "Office123!"}).json()
         office_h = {"Authorization": "Bearer " + office["token"]}
         buyer_h = {"Authorization": "Bearer " + token}
+        office_edit = client.put(
+            f"/office/buyers/{buyer_id}",
+            json={"contact_person": "نرگس کریمی", "phone": "09125556677"},
+            headers=office_h,
+        ).json()
+        self.assertEqual(office_edit["contact_person"], "نرگس کریمی")
+        denied_edit = client.put(f"/office/buyers/{buyer_id}", json={"contact_person": "هکر"}, headers=buyer_h)
+        self.assertEqual(denied_edit.status_code, 403)
         buyers = client.get("/office/dashboard", headers=office_h).json()["buyers"]
         buyer_id = buyers[0]["id"]
         client.post(f"/office/buyers/{buyer_id}/status", json={"status": "ACTIVE", "verification_status": "VERIFIED"}, headers=office_h)

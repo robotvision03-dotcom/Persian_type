@@ -6,8 +6,8 @@
     <title>دفتر مرکز</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=16" />
-    <link rel="stylesheet" href="/static/portal.css?v=16" />
+    <link rel="stylesheet" href="/static/styles.css?v=17" />
+    <link rel="stylesheet" href="/static/portal.css?v=17" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -69,10 +69,23 @@
         </section>
         <section class="panel">
           <h2>خریداران</h2>
+          <form id="buyer-edit-form" class="vehicle-form hidden">
+            <h4>ویرایش پروفایل خریدار</h4>
+            <input type="hidden" name="buyer_id" />
+            <label class="spec-field"><span>نام</span><input name="contact_person" required /></label>
+            <label class="spec-field"><span>کد ملی</span><input name="national_id" /></label>
+            <label class="spec-field"><span>تلفن</span><input name="phone" /></label>
+            <label class="spec-field"><span>ایمیل</span><input name="email" type="email" /></label>
+            <label class="spec-field"><span>کسب‌وکار</span><input name="business_name" /></label>
+            <label class="spec-field"><span>شهر</span><input name="city" /></label>
+            <label class="spec-field wide"><span>نشانی</span><input name="address" /></label>
+            <button class="start" type="submit">ذخیره پروفایل</button>
+            <button class="ghost" id="buyer-edit-cancel" type="button">بستن</button>
+          </form>
           <div id="buyers"></div>
         </section>
       </div>
     </main>
-    <script src="/static/office.js?v=16"></script>
+    <script src="/static/office.js?v=17"></script>
   </body>
 </html>

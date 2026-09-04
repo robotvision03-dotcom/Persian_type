@@ -7,6 +7,7 @@ let CATALOG = null;
 let liveRevision = 0;
 let liveTimer = null;
 let refreshing = false;
+let lastBuyers = [];
 
 async function api(path, options) {
   const response = await fetch(path, { ...(options || {}), headers: { ...headers(), ...((options && options.headers) || {}) } });
@@ -209,10 +210,12 @@ async function refresh(options) {
       const cancelBtn = card.querySelector(".cancel-auc");
       if (cancelBtn && (!auction || auction.status !== "ACTIVE")) cancelBtn.remove();
     });
+    lastBuyers = dash.buyers || [];
     $("buyers").innerHTML = `<table class="appts"><thead><tr><th>خریدار</th><th>وضعیت</th><th></th></tr></thead><tbody>${(dash.buyers || [])
       .map(
         (row) => `<tr><td>${escapeHtml(row.contact_person || row.business_name || row.email)} · ${escapeHtml(row.phone || "—")} · کد ${escapeHtml(row.national_id || "—")} (#${row.id})</td><td>${escapeHtml(row.status)} / ${escapeHtml(row.verification_status)}</td>
       <td><button class="start activate" data-id="${row.id}">فعال و تأیید</button>
+      <button class="ghost edit-buyer" type="button" data-id="${row.id}">ویرایش</button>
       <button class="ghost suspend" data-id="${row.id}">تعلیق</button></td></tr>`
       )
       .join("")}</tbody></table>`;
@@ -258,10 +261,12 @@ async function refresh(options) {
       </article>`;
     })
     .join("");
+  lastBuyers = dash.buyers || [];
   $("buyers").innerHTML = `<table class="appts"><thead><tr><th>خریدار</th><th>وضعیت</th><th></th></tr></thead><tbody>${(dash.buyers || [])
     .map(
       (row) => `<tr><td>${escapeHtml(row.contact_person || row.business_name || row.email)} · ${escapeHtml(row.phone || "—")} · کد ${escapeHtml(row.national_id || "—")} (#${row.id})</td><td>${escapeHtml(row.status)} / ${escapeHtml(row.verification_status)}</td>
       <td><button class="start activate" data-id="${row.id}">فعال و تأیید</button>
+      <button class="ghost edit-buyer" type="button" data-id="${row.id}">ویرایش</button>
       <button class="ghost suspend" data-id="${row.id}">تعلیق</button></td></tr>`
     )
     .join("")}</tbody></table>`;
@@ -329,6 +334,30 @@ $("appt-form").addEventListener("submit", async (event) => {
   }
   resetApptForm();
   refresh();
+});
+
+$("buyer-edit-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const id = form.get("buyer_id");
+  await api(`/office/buyers/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      contact_person: form.get("contact_person") || "",
+      national_id: form.get("national_id") || "",
+      phone: form.get("phone") || "",
+      email: form.get("email") || "",
+      business_name: form.get("business_name") || "",
+      city: form.get("city") || "",
+      address: form.get("address") || "",
+    }),
+  });
+  event.target.classList.add("hidden");
+  refresh();
+});
+
+$("buyer-edit-cancel").addEventListener("click", () => {
+  $("buyer-edit-form").classList.add("hidden");
 });
 
 $("express-form").addEventListener("submit", async (event) => {
@@ -445,6 +474,21 @@ document.addEventListener("click", async (event) => {
     if (btn.classList.contains("cancel-auc")) await api(`/office/auctions/${id}/cancel`, { method: "POST" });
     if (btn.classList.contains("accept")) await api(`/office/auctions/${id}/accept-winner`, { method: "POST" });
     if (btn.classList.contains("reject")) await api(`/office/auctions/${id}/reject-winner`, { method: "POST" });
+    if (btn.classList.contains("edit-buyer")) {
+      const buyer = lastBuyers.find((row) => String(row.id) === String(id)) || {};
+      const form = $("buyer-edit-form");
+      form.classList.remove("hidden");
+      form.buyer_id.value = id;
+      form.contact_person.value = buyer.contact_person || "";
+      form.national_id.value = buyer.national_id || "";
+      form.phone.value = buyer.phone || "";
+      form.email.value = buyer.email || "";
+      form.business_name.value = buyer.business_name || "";
+      form.city.value = buyer.city || "";
+      form.address.value = buyer.address || "";
+      form.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
     if (btn.classList.contains("activate")) await api(`/office/buyers/${id}/status`, { method: "POST", body: JSON.stringify({ status: "ACTIVE", verification_status: "VERIFIED" }) });
     if (btn.classList.contains("suspend")) await api(`/office/buyers/${id}/status`, { method: "POST", body: JSON.stringify({ status: "SUSPENDED" }) });
     refresh();
