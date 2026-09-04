@@ -1,6 +1,11 @@
 const $ = (id) => document.getElementById(id);
 const tokenKey = "buyer-token";
 
+function showPane(id) {
+  document.querySelectorAll("[data-pane]").forEach((el) => el.classList.toggle("on", el.getAttribute("data-pane") === id));
+  document.querySelectorAll("[data-tab]").forEach((el) => el.classList.toggle("on", el.getAttribute("data-tab") === id));
+}
+
 function token() {
   return localStorage.getItem(tokenKey) || "";
 }
@@ -365,6 +370,11 @@ $("logout-btn").addEventListener("click", async () => {
 });
 
 document.addEventListener("click", async (event) => {
+  const tab = event.target.closest("[data-tab]");
+  if (tab) {
+    showPane(tab.getAttribute("data-tab"));
+    return;
+  }
   if (event.target.closest("#hist-prev")) {
     historyDay = historyPrev || historyDay;
     historyPage = 1;

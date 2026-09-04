@@ -1,3 +1,57 @@
+.portal-page .topbar.compact {
+  padding-bottom: 8px;
+}
+
+.portal-page .topbar.compact h1 {
+  margin: 2px 0 0;
+  font-size: 1.6rem;
+}
+
+.portal-page .topbar.compact .lede {
+  display: none;
+}
+
+.tabs {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 8px 0;
+  background: linear-gradient(180deg, #0c1712 70%, transparent);
+}
+
+.tabs button[data-tab] {
+  border: 1px solid var(--line);
+  background: rgba(244, 239, 226, 0.06);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.tabs button[data-tab].on {
+  background: var(--gold);
+  color: #1a1406;
+  border-color: var(--gold);
+}
+
+.pane {
+  display: none;
+}
+
+.pane.on {
+  display: block;
+}
+
+.inspect-wrap {
+  margin-top: 10px;
+}
+
 .portal .stack {
   display: grid;
   gap: 10px;

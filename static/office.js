@@ -123,26 +123,16 @@ function renderPendingWinners(winners) {
 
 function renderNotes(rows, winners) {
   paintWinnerBanner(rows, winners);
-  const box = $("notes");
-  if (!box) return;
-  const items = rows || [];
-  if (!items.length) {
-    box.className = "empty";
-    box.textContent = "اعلانی نیست.";
-    return;
-  }
-  box.className = "note-list";
-  box.innerHTML = items
-    .map((row) => {
-      const win = row.event === "WINNER_READY" || row.event === "YOU_WON" || row.event === "WINNER_ACCEPTED";
-      return `<article class="note-card ${row.unread ? "unread" : ""} ${win ? "notice-win" : ""}">
-        <h4>${escapeHtml(row.title)}</h4>
-        <p>${escapeHtml(row.body || "")}</p>
-        <p class="hint">${escapeHtml(row.created_at || "")}</p>
-        ${row.unread ? `<button class="ghost note-read" type="button" data-note="${row.id}">خواندم</button>` : ""}
-      </article>`;
-    })
-    .join("");
+}
+
+function showPane(id) {
+  document.querySelectorAll("[data-pane]").forEach((el) => el.classList.toggle("on", el.getAttribute("data-pane") === id));
+  document.querySelectorAll("[data-tab]").forEach((el) => el.classList.toggle("on", el.getAttribute("data-tab") === id));
+}
+
+function openForm(id, hideIds) {
+  (hideIds || []).forEach((other) => $(other) && $(other).classList.add("hidden"));
+  if ($(id)) $(id).classList.remove("hidden");
 }
 
 async function loadNotes(winners) {
@@ -490,8 +480,11 @@ async function refresh(options) {
           ${winner ? `<button class="start accept" type="button" data-id="${auction.id}">پذیرش برنده</button><button class="ghost reject" type="button" data-id="${auction.id}">رد برنده</button>` : ""}
         </div>
         ${auction ? `<div class="bid-box" data-bids="${auction.id}"></div>` : ""}
-        ${renderSpecs(car)}
-        ${renderInspection(car)}
+        <button class="ghost toggle-inspect" type="button" data-open="${car.id}">کارشناسی و مشخصات</button>
+        <div class="inspect-wrap hidden" data-inspect="${car.id}">
+          ${renderSpecs(car)}
+          ${renderInspection(car)}
+        </div>
       </article>`;
     })
     .join("");
@@ -561,7 +554,7 @@ async function resetApptForm() {
   const form = $("appt-form");
   form.reset();
   form.appointment_id.value = "";
-  $("cancel-edit").classList.add("hidden");
+  form.classList.add("hidden");
   form.querySelector("button[type=submit]").textContent = "ثبت نوبت";
   await fillNow(form, "appt");
 }
@@ -602,6 +595,7 @@ $("appt-form").addEventListener("submit", async (event) => {
   }
   apptDay = payload.date;
   await resetApptForm();
+  showPane("appts");
   refresh();
 });
 
@@ -653,7 +647,9 @@ $("express-form").addEventListener("submit", async (event) => {
   await api("/office/appointments", { method: "POST", body: JSON.stringify(payload) });
   apptDay = payload.date;
   event.target.reset();
+  event.target.classList.add("hidden");
   await fillNow(event.target, "express");
+  showPane("cars");
   refresh();
 });
 
@@ -685,6 +681,33 @@ document.addEventListener("submit", async (event) => {
 });
 
 document.addEventListener("click", async (event) => {
+  const tab = event.target.closest("[data-tab]");
+  if (tab) {
+    showPane(tab.getAttribute("data-tab"));
+    return;
+  }
+  if (event.target.closest("#open-appt")) {
+    showPane("appts");
+    openForm("appt-form", ["express-form"]);
+    await fillNow($("appt-form"), "appt");
+    return;
+  }
+  if (event.target.closest("#open-express")) {
+    showPane("appts");
+    openForm("express-form", ["appt-form"]);
+    await fillNow($("express-form"), "express");
+    return;
+  }
+  if (event.target.closest("#close-express")) {
+    $("express-form").classList.add("hidden");
+    return;
+  }
+  const inspectToggle = event.target.closest(".toggle-inspect");
+  if (inspectToggle) {
+    const box = document.querySelector(`[data-inspect="${inspectToggle.getAttribute("data-open")}"]`);
+    if (box) box.classList.toggle("hidden");
+    return;
+  }
   const toggle = event.target.closest(".pick-toggle");
   if (toggle) {
     const root = toggle.closest(".picker");
@@ -843,10 +866,9 @@ document.addEventListener("click", async (event) => {
       pickers.appt.date = form.date.value;
       pickers.appt.time = form.time.value;
       await bindPicker("appt");
-      openPicker(document.querySelector('[data-picker="appt"]'));
+      showPane("appts");
+      openForm("appt-form", ["express-form"]);
       form.querySelector("button[type=submit]").textContent = "ذخیره نوبت";
-      $("cancel-edit").classList.remove("hidden");
-      form.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     if (btn.classList.contains("cancel-appt")) await api(`/office/appointments/${id}/status`, { method: "POST", body: JSON.stringify({ status: "CANCELLED" }) });
@@ -855,7 +877,10 @@ document.addEventListener("click", async (event) => {
       await api(`/office/appointments/${id}`, { method: "DELETE" });
     }
     if (btn.classList.contains("arrive")) await api(`/office/appointments/${id}/status`, { method: "POST", body: JSON.stringify({ status: "ARRIVED" }) });
-    if (btn.classList.contains("inspect")) await api(`/office/vehicles/${id}/inspect`, { method: "POST" });
+    if (btn.classList.contains("inspect")) {
+      await api(`/office/vehicles/${id}/inspect`, { method: "POST" });
+      showPane("cars");
+    }
     if (btn.classList.contains("approve")) await api(`/office/vehicles/${id}/approve`, { method: "POST" });
     if (btn.classList.contains("publish")) await api(`/office/vehicles/${id}/publish`, { method: "POST", body: JSON.stringify({}) });
     if (btn.classList.contains("cancel-auc")) await api(`/office/auctions/${id}/cancel`, { method: "POST" });
@@ -873,7 +898,7 @@ document.addEventListener("click", async (event) => {
       form.business_name.value = buyer.business_name || "";
       form.city.value = buyer.city || "";
       form.address.value = buyer.address || "";
-      form.scrollIntoView({ behavior: "smooth", block: "center" });
+      showPane("buyers");
       return;
     }
     if (btn.classList.contains("activate")) await api(`/office/buyers/${id}/status`, { method: "POST", body: JSON.stringify({ status: "ACTIVE", verification_status: "VERIFIED" }) });

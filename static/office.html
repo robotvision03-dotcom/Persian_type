@@ -6,20 +6,19 @@
     <title>دفتر مرکز</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=25" />
-    <link rel="stylesheet" href="/static/portal.css?v=25" />
+    <link rel="stylesheet" href="/static/styles.css?v=26" />
+    <link rel="stylesheet" href="/static/portal.css?v=26" />
   </head>
-  <body>
+  <body class="portal-page">
     <div class="backdrop"></div>
-    <header class="topbar">
+    <header class="topbar compact">
       <div>
         <p class="eyebrow">مرکز کارشناسی</p>
-        <h1>داشبورد دفتر</h1>
-        <p class="lede">نوبت، کارشناسی، انتشار مزایده و تأیید برنده. دفتر دروازه ارتباط با خریداران است.</p>
+        <h1>دفتر</h1>
       </div>
       <div class="pills">
-        <a class="path-chip" href="/">تماس مشتری</a>
-        <a class="path-chip" href="/buyer">پورتال خریدار</a>
+        <a class="path-chip" href="/">تماس</a>
+        <a class="path-chip" href="/buyer">خریدار</a>
       </div>
     </header>
     <main class="shell portal">
@@ -34,26 +33,26 @@
       </section>
       <div id="app-box" class="hidden">
         <div id="winner-banner" class="winner-sticky hidden" role="status"></div>
-        <section class="panel" id="notes-panel">
-          <div class="panel-head">
-            <h2>اعلان برنده و پیام‌ها</h2>
-            <button class="ghost" id="notes-read" type="button">همه خوانده شد</button>
-          </div>
-          <div id="pending-winners"></div>
-          <div id="notes" class="empty">اعلانی نیست.</div>
-        </section>
-        <section class="panel">
-          <div class="panel-head">
-            <h2>نوبت‌ها</h2>
-            <button class="ghost" id="logout-btn" type="button">خروج</button>
-          </div>
+        <div id="pending-winners"></div>
+        <nav class="tabs" id="office-tabs">
+          <button type="button" class="on" data-tab="appts">نوبت‌ها</button>
+          <button type="button" data-tab="cars">خودروها</button>
+          <button type="button" data-tab="hist">گزارش</button>
+          <button type="button" data-tab="buyers">خریداران</button>
+          <button class="ghost" id="logout-btn" type="button">خروج</button>
+        </nav>
+        <section class="panel pane on" data-pane="appts">
           <div class="day-nav">
             <button class="ghost" type="button" id="appt-prev">روز قبل</button>
             <strong id="appt-label">امروز</strong>
             <button class="ghost" type="button" id="appt-next">روز بعد</button>
             <button class="ghost" type="button" id="appt-today">امروز</button>
           </div>
-          <form id="appt-form" class="vehicle-form">
+          <div class="actions">
+            <button class="ghost" id="open-appt" type="button">ثبت نوبت</button>
+            <button class="start" id="open-express" type="button">ثبت فوری</button>
+          </div>
+          <form id="appt-form" class="vehicle-form hidden">
             <input type="hidden" name="appointment_id" value="" />
             <input type="hidden" name="date" id="appt-date" required />
             <input type="hidden" name="time" id="appt-time" required />
@@ -79,11 +78,11 @@
             <input name="customer_phone" placeholder="تلفن" />
             <div class="actions">
               <button class="start" type="submit">ثبت نوبت</button>
-              <button class="ghost hidden" id="cancel-edit" type="button">انصراف ویرایش</button>
+              <button class="ghost" id="cancel-edit" type="button">بستن</button>
             </div>
           </form>
-          <form id="express-form" class="vehicle-form">
-            <h4>ورود خارج از نوبت / مزایده فوری</h4>
+          <form id="express-form" class="vehicle-form hidden">
+            <h4>ثبت فوری / مزایده فوری</h4>
             <input type="hidden" name="date" />
             <input type="hidden" name="time" />
             <div class="picker" data-picker="express">
@@ -109,19 +108,18 @@
             <input name="model" placeholder="مدل" />
             <input name="year" placeholder="سال" />
             <input name="starting_price" placeholder="شروع قیمت" />
-            <button class="ghost" type="submit" data-mode="ready">ثبت و آماده مزایده</button>
-            <button class="start" type="submit" data-mode="publish">ثبت و انتشار فوری</button>
+            <div class="actions">
+              <button class="ghost" type="submit" data-mode="ready">آماده مزایده</button>
+              <button class="start" type="submit" data-mode="publish">انتشار فوری</button>
+              <button class="ghost" id="close-express" type="button">بستن</button>
+            </div>
           </form>
           <div id="appts"></div>
         </section>
-        <section class="panel">
-          <h2>خودروها و مزایده</h2>
+        <section class="panel pane" data-pane="cars">
           <div id="vehicles"></div>
         </section>
-        <section class="panel">
-          <div class="panel-head">
-            <h2>گزارش روزانه مزایده</h2>
-          </div>
+        <section class="panel pane" data-pane="hist">
           <div class="day-nav">
             <button class="ghost" type="button" id="hist-prev">روز قبل</button>
             <strong id="hist-label">امروز</strong>
@@ -132,8 +130,7 @@
           <div id="history"></div>
           <div class="day-nav" id="hist-pages"></div>
         </section>
-        <section class="panel">
-          <h2>خریداران</h2>
+        <section class="panel pane" data-pane="buyers">
           <form id="buyer-edit-form" class="vehicle-form hidden">
             <h4>ویرایش پروفایل خریدار</h4>
             <input type="hidden" name="buyer_id" />
@@ -151,6 +148,6 @@
         </section>
       </div>
     </main>
-    <script src="/static/office.js?v=25"></script>
+    <script src="/static/office.js?v=26"></script>
   </body>
 </html>
