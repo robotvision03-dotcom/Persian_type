@@ -50,10 +50,12 @@ async function refresh() {
             <p>کارشناسی: ${item.inspection_summary || "انجام شده"}</p>
             <p>پیشنهاد فعلی: ${money(auction.current_price)}</p>
             <p>حداقل افزایش: ${money(auction.bid_increment)} (۰٫۵٪)</p>
-            <p>حداقل بعدی: ${money(auction.minimum_next_bid)}</p>
+            <p class="next-bid-row">حداقل بعدی: ${money(auction.minimum_next_bid)}
+              <button type="button" class="ghost use-min-btn" data-id="${auction.id}" data-amount="${auction.minimum_next_bid || 0}">پیشنهاد این مبلغ</button>
+            </p>
             <p>پایان: ${auction.end_time || ""}</p>
             <div class="actions">
-              <input data-id="${auction.id}" class="bid-amount" type="number" placeholder="مبلغ پیشنهاد" />
+              <input data-id="${auction.id}" class="bid-amount" type="number" placeholder="پیشنهاد فرد" />
               <button class="start bid-btn" data-id="${auction.id}">ثبت پیشنهاد</button>
               <input data-auto="${auction.id}" class="auto-amount" type="number" placeholder="سقف خودکار" />
               <button class="ghost auto-btn" data-id="${auction.id}">پیشنهاد خودکار</button>
@@ -119,6 +121,17 @@ $("logout-btn").addEventListener("click", async () => {
 });
 
 document.addEventListener("click", async (event) => {
+  const useMin = event.target.closest(".use-min-btn");
+  if (useMin) {
+    const id = useMin.getAttribute("data-id");
+    const amount = useMin.getAttribute("data-amount") || "";
+    const field = document.querySelector(`.bid-amount[data-id="${id}"]`);
+    if (field) {
+      field.value = amount;
+      field.focus();
+    }
+    return;
+  }
   const bid = event.target.closest(".bid-btn");
   const auto = event.target.closest(".auto-btn");
   try {

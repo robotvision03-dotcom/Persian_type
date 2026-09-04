@@ -40,3 +40,15 @@
   gap: 8px;
   margin-top: 10px;
 }
+
+.next-bid-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.next-bid-row .use-min-btn {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+}
