@@ -23,11 +23,10 @@ run.bat
 یا دستی:
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 $env:MODELS_DIR = "C:\Users\omid\Documents\appointment\models"
-python -m app
+.\.venv\Scripts\python.exe -m app
 ```
 
 سپس مرورگر را روی [http://127.0.0.1:8000](http://127.0.0.1:8000) باز کنید.
@@ -49,7 +48,7 @@ python -m app
 اگر `shenava-koochik-v1.5` فقط فایل `.nemo` دارد:
 
 ```powershell
-pip install "nemo_toolkit[asr]"
+py -m pip install "nemo_toolkit[asr]"
 ```
 
 اگر همان پوشه `encoder.onnx` / `decoder.onnx` / `joiner.onnx` و `tokens.txt` داشته باشد، برنامه از sherpa-onnx استفاده می‌کند و به NeMo نیاز نیست.
@@ -57,5 +56,5 @@ pip install "nemo_toolkit[asr]"
 ## تست
 
 ```powershell
-python -m unittest discover -s tests -v
+py -m unittest discover -s tests -v
 ```
