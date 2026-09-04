@@ -54,6 +54,8 @@ class AppStateTests(unittest.TestCase):
             snapshot = app_state.snapshot()
             self.assertEqual(snapshot["asr"]["id"], "shenava-koochik-ctc")
             self.assertEqual(snapshot["llm_model"], "llama3.2:3b")
+            self.assertEqual(snapshot["open_days"], "شنبه تا پنجشنبه")
+            self.assertTrue(snapshot["hours_panel"]["all"])
 
     def test_boot_and_transcribe(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -18,7 +18,9 @@ class DialogueTests(unittest.TestCase):
             manager = DialogueManager(db_path=db_path)
             start = manager.start("s1")
             self.assertEqual(start["reply"], GREETING)
-            self.assertEqual(manager.handle("s1", "پژو")["reply"], ASK_MODEL)
+            self.assertTrue(start["hours"]["all"])
+            self.assertIn("شنبه", start["hours"]["open_days"])
+            self.assertEqual(manager.handle("s1", "پژو")["phase"], "ask_model")
             self.assertEqual(manager.handle("s1", "پارس")["reply"], ASK_KM)
             self.assertEqual(manager.handle("s1", "۸۰۰۰۰")["reply"], ASK_NAME)
             after_name = manager.handle("s1", "علی رضایی")
@@ -56,6 +58,14 @@ class DialogueTests(unittest.TestCase):
             turn = manager.handle("s1", "peguete 206")
             self.assertEqual(turn["reply"], ASK_KM)
             self.assertEqual(turn["customer"]["car_model"], "206")
+
+    def test_partial_samand_letters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = DialogueManager(db_path=Path(tmp) / "book.sqlite")
+            manager.start("s1")
+            turn = manager.handle("s1", "سمن")
+            self.assertEqual(turn["customer"]["car_name"], "سمند")
+            self.assertEqual(turn["phase"], "ask_model")
 
 
 if __name__ == "__main__":

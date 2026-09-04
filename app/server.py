@@ -18,12 +18,14 @@ from .audio import TARGET_RATE, concat, int16_bytes_to_float32
 from .booking import (
     available_slots,
     book_appointment,
+    hours_panel,
     init_db,
     is_office_open,
     list_appointments,
     month_calendar,
     slot_times,
 )
+from .cars import catalog_payload, match_vehicle
 from .dialogue import DialogueManager
 from .discovery import ModelInfo, find_models_dir, find_shenava_ctc, scan_models
 from .engines import Engine, TranscriptionError, load_engine
@@ -93,8 +95,10 @@ class AppState:
                 "status": self.status,
                 "llm_model": "llama3.2:3b",
                 "hours": "۰۹:۰۰ تا ۱۷:۰۰",
-                "open_days": "دوشنبه تا جمعه",
+                "open_days": "شنبه تا پنجشنبه",
+                "weekend": "جمعه",
                 "today_jalali": {"year": jy, "month": jm},
+                "hours_panel": hours_panel(db_path=self.db_path),
             }
 
     def boot(self) -> dict[str, Any]:
@@ -205,12 +209,23 @@ def get_slots(date: str) -> dict[str, Any]:
     from datetime import date as date_cls
 
     parsed = date_cls.fromisoformat(date)
+    panel = hours_panel(parsed, db_path=state.db_path)
     return {
         "date": date,
         "all": slot_times() if is_office_open(parsed) else [],
         "slots": available_slots(date, db_path=state.db_path),
         "open": is_office_open(parsed),
+        "jalali": panel["jalali"],
+        "open_days": panel["open_days"],
+        "weekend": panel["weekend"],
     }
+
+
+@app.get("/api/cars")
+def get_cars(q: str = "") -> dict[str, Any]:
+    if q.strip():
+        return {"query": q, "match": match_vehicle(q).as_dict(), "cars": catalog_payload()}
+    return {"cars": catalog_payload()}
 
 
 @app.get("/api/appointments")

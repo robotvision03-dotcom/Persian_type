@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import booking
+from .cars import brand_models
 from .nlu import (
     NO_WORDS,
     PHASE_ASK_CAR,
@@ -26,12 +27,12 @@ from .nlu import (
     parse_slots,
 )
 
-GREETING = "سلام وقت بخیر. لطفا اسم خودروی خود را بگویی."
+GREETING = "سلام وقت بخیر. لطفا اسم خودروی خود را بگویید."
 ASK_CAR = GREETING
-ASK_MODEL = "مدل خودروی شما چیست؟"
-ASK_KM = "کارکرد خودرو به کیلومتر."
+ASK_MODEL = "کدام مدل را برای خرید می‌خواهید؟"
+ASK_KM = "خودرو صفر است یا کارکرد دارد؟ اگر کارکرد دارد کیلومتر را بگویید."
 ASK_NAME = "نام و نام خانوادگی چیست؟"
-ASK_REPEAT = "متوجه نشدم. لطفا کوتاه‌تر بفرمایید."
+ASK_REPEAT = "متوجه نشدم. لطفا نام خودرو را از خودروهای موجود بگویید."
 
 PROMPTS = {
     PHASE_ASK_CAR: ASK_CAR,
@@ -64,6 +65,7 @@ class DialogueManager:
     def start(self, session_id: str) -> dict[str, Any]:
         with self._lock:
             session = CallSession(session_id=session_id, live=True)
+            session.offered_slots = booking.next_open_slots(limit=12, db_path=self.db_path)
             session.messages.append({"role": "agent", "content": GREETING})
             self._sessions[session_id] = session
             return self._payload(session, GREETING)
@@ -95,17 +97,18 @@ class DialogueManager:
         if session.phase == PHASE_ASK_SLOT:
             return self._on_slot(session, text)
 
-        slots = parse_slots(text, session.phase)
+        slots = parse_slots(text, session.phase, prefer_brand=session.car_name)
+        if session.phase == PHASE_ASK_CAR and slots.get("candidates") and not slots.get("car_name"):
+            names = " یا ".join(slots["candidates"])
+            return self._reply(session, text, f"کدام خودرو را می‌گویید؟ {names}.")
         self._fill_slots(session, slots, text)
         return self._prompt_next(session, text)
 
     def _fill_slots(self, session: CallSession, slots: dict[str, Any], text: str) -> None:
         if slots.get("car_name"):
             session.car_name = str(slots["car_name"]).strip()
-        elif session.phase == PHASE_ASK_CAR and not session.car_name:
-            value = text.strip()
-            if len(value) >= 2:
-                session.car_name = value
+        if session.car_name and not session.car_model and not brand_models(session.car_name):
+            session.car_model = "استاندارد"
 
         if slots.get("car_model"):
             session.car_model = str(slots["car_model"]).strip()
@@ -140,6 +143,15 @@ class DialogueManager:
         session.phase = nxt
         if nxt == PHASE_ASK_SLOT:
             return self._offer_slots(session, text)
+        if nxt == PHASE_ASK_MODEL:
+            models = brand_models(session.car_name)
+            if models:
+                listed = "، ".join(models[:6])
+                return self._reply(
+                    session,
+                    text,
+                    f"{session.car_name} ثبت شد. کدام مدل را برای خرید می‌خواهید؟ مثلاً {listed}.",
+                )
         return self._reply(session, text, PROMPTS[nxt])
 
     def _offer_slots(self, session: CallSession, text: str) -> dict[str, Any]:
@@ -150,8 +162,9 @@ class DialogueManager:
             return self._reply(session, text, "در روزهای کاری نوبت خالی پیدا نشد.")
         labels = "، ".join(item["label"] for item in slots)
         reply = (
-            f"{session.customer_name} عزیز، نوبت‌های خالی دفتر از دوشنبه تا جمعه ساعت ۹ تا ۱۷ این‌هاست: "
-            f"{labels}. اگر اولین وقت مناسب است بگویید بله."
+            f"{session.customer_name} عزیز، برای بازدید و خرید {session.car_name} {session.car_model} "
+            f"وقت‌های خالی شنبه تا پنجشنبه ساعت ۹ تا ۱۷ این‌هاست: {labels}. "
+            "اگر اولین وقت مناسب است بگویید بله."
         )
         return self._reply(session, text, reply)
 
@@ -197,9 +210,10 @@ class DialogueManager:
         session.appointment_id = appt_id
         session.phase = PHASE_BOOKED
         session.live = False
+        km_label = "صفر" if session.km == 0 else f"{session.km} کیلومتر"
         reply = (
-            f"نوبت ثبت شد. {session.customer_name}، {session.car_name} {session.car_model} "
-            f"با کارکرد {session.km} کیلومتر، {slot['label']}."
+            f"نوبت بازدید و خرید ثبت شد. {session.customer_name}، {session.car_name} {session.car_model} "
+            f"({km_label})، {slot['label']}."
         )
         return self._reply(session, text, reply)
 
@@ -222,4 +236,5 @@ class DialogueManager:
             },
             "messages": list(session.messages),
             "live": session.live,
+            "hours": booking.hours_panel(db_path=self.db_path),
         }

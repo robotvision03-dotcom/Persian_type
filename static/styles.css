@@ -506,6 +506,10 @@ button,
   padding: 4px 0;
 }
 
+.weekdays span:last-child {
+  color: #d45b4d;
+}
+
 .day {
   aspect-ratio: 1;
   border: 0;

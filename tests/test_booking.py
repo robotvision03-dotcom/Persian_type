@@ -27,11 +27,15 @@ class JalaliTests(unittest.TestCase):
 
 
 class BookingTests(unittest.TestCase):
-    def test_office_hours_monday_friday(self):
-        monday = date(2026, 9, 7)
+    def test_office_hours_persian_week(self):
+        friday = date(2026, 9, 4)
         saturday = date(2026, 9, 5)
+        monday = date(2026, 9, 7)
+        thursday = date(2026, 9, 10)
+        self.assertFalse(is_office_open(friday))
+        self.assertTrue(is_office_open(saturday))
         self.assertTrue(is_office_open(monday))
-        self.assertFalse(is_office_open(saturday))
+        self.assertTrue(is_office_open(thursday))
         self.assertEqual(slot_times()[0], "09:00")
         self.assertEqual(slot_times()[-1], "16:30")
 

@@ -94,6 +94,7 @@ function applyTurn(payload, userText) {
     speakFa(payload.reply);
   }
   if (payload?.appointment_id) loadAppts();
+  if (payload?.hours?.date) selectedDate = payload.hours.date;
   loadCalendar();
   if (payload?.phase === "booked") {
     statusLine.textContent = "نوبت ثبت شد";
@@ -110,6 +111,10 @@ async function beginSession() {
   }).then((r) => r.json());
   addMsg("agent", payload.reply, "منشی");
   speakFa(payload.reply);
+  if (payload.hours?.date) {
+    selectedDate = payload.hours.date;
+    renderHours(payload.hours);
+  }
   return payload;
 }
 
@@ -129,12 +134,41 @@ $("composer").addEventListener("submit", async (event) => {
 
 $("weekdays").innerHTML = ["ش", "ی", "د", "س", "چ", "پ", "ج"].map((d) => `<span>${d}</span>`).join("");
 
+function renderHours(data) {
+  if (!data) return;
+  $("day-label").textContent = data.open
+    ? `ساعت‌های خالی ${data.jalali || data.date} — شنبه تا پنجشنبه ۹ تا ۱۷، جمعه تعطیل`
+    : `${data.jalali || data.date} جمعه است و دفتر تعطیل است.`;
+  const box = $("times");
+  box.innerHTML = "";
+  (data.all || []).forEach((time) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = time;
+    const free = (data.slots || []).includes(time);
+    if (!free) {
+      btn.className = "busy";
+      btn.disabled = true;
+    }
+    btn.addEventListener("click", () => {
+      selectedTime = time;
+      [...box.querySelectorAll("button")].forEach((el) => el.classList.remove("pick"));
+      btn.classList.add("pick");
+    });
+    box.appendChild(btn);
+  });
+  if (!(data.all || []).length) {
+    box.innerHTML = "<p class='hint'>این روز دفتر باز نیست. روز کاری بعد را از تقویم بزنید.</p>";
+  }
+}
+
 async function loadCalendar() {
   const query = cal.year ? `?year=${cal.year}&month=${cal.month}` : "";
   const data = await fetch("/api/calendar" + query).then((r) => r.json());
   cal.year = data.year;
   cal.month = data.month;
   $("month-title").textContent = `${data.month_name || MONTHS[data.month - 1]} ${data.year}`;
+  if (!selectedDate && data.focus?.date) selectedDate = data.focus.date;
   const weeks = $("weeks");
   weeks.innerHTML = "";
   data.weeks.flat().forEach((cell) => {
@@ -161,35 +195,20 @@ async function loadCalendar() {
     btn.addEventListener("click", () => selectDay(cell.date));
     weeks.appendChild(btn);
   });
+  if (selectedDate && data.focus && selectedDate === data.focus.date) {
+    renderHours(data.focus);
+  } else if (selectedDate) {
+    const slots = await fetch("/api/slots?date=" + encodeURIComponent(selectedDate)).then((r) => r.json());
+    renderHours(slots);
+  } else if (data.focus) {
+    renderHours(data.focus);
+  }
 }
 
 async function selectDay(iso) {
   selectedDate = iso;
   selectedTime = null;
   await loadCalendar();
-  const data = await fetch("/api/slots?date=" + encodeURIComponent(iso)).then((r) => r.json());
-  $("day-label").textContent = data.open
-    ? `ساعت‌های خالی ${iso} — دوشنبه تا جمعه ۹ تا ۱۷`
-    : "این روز دفتر تعطیل است.";
-  const box = $("times");
-  box.innerHTML = "";
-  (data.all || []).forEach((time) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = time;
-    const free = (data.slots || []).includes(time);
-    if (!free) {
-      btn.className = "busy";
-      btn.disabled = true;
-    }
-    btn.addEventListener("click", () => {
-      selectedTime = time;
-      [...box.querySelectorAll("button")].forEach((el) => el.classList.remove("pick"));
-      btn.classList.add("pick");
-    });
-    box.appendChild(btn);
-  });
-  if (!(data.all || []).length) box.innerHTML = "<p class='hint'>این روز دفتر باز نیست.</p>";
 }
 
 $("prev-m").addEventListener("click", () => {

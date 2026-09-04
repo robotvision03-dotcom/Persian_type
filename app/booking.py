@@ -1,4 +1,4 @@
-"""Monday–Friday 09:00–17:00 appointment calendar and customer list."""
+"""Persian-week appointment calendar: Saturday–Thursday 09:00–17:00, Friday closed."""
 
 from __future__ import annotations
 
@@ -60,8 +60,34 @@ def init_db(db_path: Path | None = None) -> None:
 
 
 def is_office_open(day: date) -> bool:
-    """Open Monday to Friday (دوشنبه تا جمعه غربی). Saturday and Sunday are closed."""
-    return day.weekday() < 5
+    """Iranian week: Friday is the weekend. Saturday through Thursday are working days."""
+    return day.weekday() != 4
+
+
+def next_open_date(start: date | None = None) -> date:
+    day = start or date.today()
+    for _offset in range(14):
+        if is_office_open(day):
+            return day
+        day += timedelta(days=1)
+    return day
+
+
+def hours_panel(day: date | None = None, db_path: Path | None = None) -> dict[str, Any]:
+    """Always-visible empty hours for the next working day (or a chosen day)."""
+    target = day or next_open_date()
+    iso = target.isoformat()
+    open_ = is_office_open(target)
+    return {
+        "date": iso,
+        "jalali": format_jalali(target),
+        "open": open_,
+        "all": slot_times() if open_ else [],
+        "slots": available_slots(iso, db_path) if open_ else [],
+        "hours": f"{OFFICE_START} تا {OFFICE_END}",
+        "open_days": "شنبه تا پنجشنبه",
+        "weekend": "جمعه",
+    }
 
 
 def slot_times() -> list[str]:
@@ -153,7 +179,9 @@ def month_calendar(jy: int | None = None, jm: int | None = None, db_path: Path |
         "month_name": MONTHS_FA[jm - 1],
         "weeks": weeks,
         "hours": f"{OFFICE_START} تا {OFFICE_END}",
-        "open_days": "دوشنبه تا جمعه",
+        "open_days": "شنبه تا پنجشنبه",
+        "weekend": "جمعه",
+        "focus": hours_panel(next_open_date(), db_path),
     }
 
 

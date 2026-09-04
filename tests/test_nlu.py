@@ -25,6 +25,14 @@ class SlotFillTests(unittest.TestCase):
         self.assertEqual(next_missing_phase("پژو", "206", None, ""), "ask_km")
         self.assertEqual(next_missing_phase("پژو", "", None, ""), "ask_model")
 
+    def test_partial_letters_resolve_samand(self):
+        slots = parse_slots("سمن", "ask_car")
+        self.assertEqual(slots["car_name"], "سمند")
+
+    def test_zero_km_word(self):
+        slots = parse_slots("صفر", "ask_km")
+        self.assertEqual(slots["km"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

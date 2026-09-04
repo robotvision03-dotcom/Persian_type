@@ -3,31 +3,30 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>رزرو نوبت نمایندگی خودرو</title>
+    <title>نوبت خرید خودرو</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/static/styles.css?v=4" />
+    <link rel="stylesheet" href="/static/styles.css?v=5" />
   </head>
   <body>
     <div class="backdrop"></div>
     <header class="topbar">
       <div>
-        <p class="eyebrow">Live Voice Agent</p>
-        <h1>رزرو نوبت کارشناسی خودرو</h1>
+        <p class="eyebrow">نمایشگاه · تماس زنده</p>
+        <h1>خرید خودرو و رزرو نوبت بازدید</h1>
         <p class="lede">
-          یک دکمه تماس. منشی سؤال کوتاه می‌پرسد، شما جواب می‌دهید، سؤال بعدی همان لحظه می‌آید.
-          اگر بگویید پژو ۲۰۶، مدل را رد می‌کند و کارکرد را می‌پرسد. شنوا کوچیک CTC و
-          <strong>llama3.2:3b</strong>
-          — دفتر دوشنبه تا جمعه، ۹ تا ۱۷.
+          تقویم شمسی است؛ <strong>جمعه تعطیل</strong> و شنبه تا پنجشنبه از ۹ تا ۱۷ باز است.
+          ساعت‌های خالی از همان سلام منشی روی صفحه می‌ماند. نام خودرو را بگویید —
+          حتی اگر حرفی جا بیفتد (مثلاً سمن → سمند) از فهرست خودروهای موجود در ایران پیدا می‌شود.
         </p>
       </div>
       <div class="pills">
         <span id="asr-chip" class="path-chip">شنوا کوچیک CTC</span>
-        <span class="path-chip">llama3.2:3b</span>
+        <span class="path-chip">فهرست خودرو ایران</span>
         <span id="status-line" class="path-chip">آماده</span>
       </div>
     </header>
@@ -35,13 +34,13 @@
     <main class="workspace dealership">
       <section class="panel call-panel">
         <div class="panel-head">
-          <h2>تماس زنده</h2>
+          <h2>تماس خرید</h2>
           <span id="call-state" class="hint">برای شروع، تماس را بزنید</span>
         </div>
         <div id="log" class="call-log"></div>
         <form id="composer" class="composer">
           <button type="button" id="call-btn" class="start">شروع تماس</button>
-          <input id="text-input" type="text" placeholder="یا پاسخ را بنویسید..." autocomplete="off" />
+          <input id="text-input" type="text" placeholder="یا نام خودرو را بنویسید..." autocomplete="off" />
           <button type="submit" class="ghost">ارسال</button>
         </form>
         <div class="meter"><span id="level-bar"></span></div>
@@ -52,18 +51,18 @@
         <section class="panel">
           <div class="cal-nav">
             <button type="button" id="prev-m" class="ghost">ماه قبل</button>
-            <strong id="month-title">تقویم دفتر</strong>
+            <strong id="month-title">تقویم شمسی دفتر</strong>
             <button type="button" id="next-m" class="ghost">ماه بعد</button>
           </div>
           <div class="weekdays" id="weekdays"></div>
           <div class="weeks" id="weeks"></div>
-          <p id="day-label" class="hint">روزهای دوشنبه تا جمعه باز است. نقطه یعنی نوبت خالی دارد.</p>
+          <p id="day-label" class="hint">شنبه تا پنجشنبه باز است. جمعه تعطیل است. ساعت‌های خالی همیشه پایین دیده می‌شود.</p>
           <div id="times" class="times"></div>
         </section>
 
         <section class="panel">
           <div class="panel-head">
-            <h2>فهرست مشتریان</h2>
+            <h2>نوبت‌های خرید</h2>
             <button type="button" id="refresh-list" class="ghost">بروزرسانی</button>
           </div>
           <div id="appts" class="empty">هنوز نوبتی ثبت نشده است.</div>
@@ -74,6 +73,6 @@
       <div class="spinner"></div>
       <p id="overlay-text">در حال آماده‌سازی...</p>
     </div>
-    <script src="/static/app.js?v=4"></script>
+    <script src="/static/app.js?v=5"></script>
   </body>
 </html>
