@@ -135,6 +135,17 @@ function openForm(id, hideIds) {
   if ($(id)) $(id).classList.remove("hidden");
 }
 
+function closeSheets() {
+  ["appt-sheet", "express-sheet"].forEach((id) => $(id) && $(id).classList.add("hidden"));
+  $("appt-form") && $("appt-form").classList.remove("hidden");
+  $("express-form") && $("express-form").classList.remove("hidden");
+}
+
+function openSheet(id) {
+  closeSheets();
+  if ($(id)) $(id).classList.remove("hidden");
+}
+
 async function loadNotes(winners) {
   if (winners) lastWinners = winners;
   renderNotes(await api("/office/notifications"), lastWinners);
@@ -554,8 +565,8 @@ async function resetApptForm() {
   const form = $("appt-form");
   form.reset();
   form.appointment_id.value = "";
-  form.classList.add("hidden");
   form.querySelector("button[type=submit]").textContent = "ثبت نوبت";
+  closeSheets();
   await fillNow(form, "appt");
 }
 
@@ -647,7 +658,7 @@ $("express-form").addEventListener("submit", async (event) => {
   await api("/office/appointments", { method: "POST", body: JSON.stringify(payload) });
   apptDay = payload.date;
   event.target.reset();
-  event.target.classList.add("hidden");
+  closeSheets();
   await fillNow(event.target, "express");
   showPane("cars");
   refresh();
@@ -683,23 +694,28 @@ document.addEventListener("submit", async (event) => {
 document.addEventListener("click", async (event) => {
   const tab = event.target.closest("[data-tab]");
   if (tab) {
+    closeSheets();
     showPane(tab.getAttribute("data-tab"));
     return;
   }
   if (event.target.closest("#open-appt")) {
     showPane("appts");
-    openForm("appt-form", ["express-form"]);
+    openSheet("appt-sheet");
     await fillNow($("appt-form"), "appt");
     return;
   }
   if (event.target.closest("#open-express")) {
     showPane("appts");
-    openForm("express-form", ["appt-form"]);
+    openSheet("express-sheet");
     await fillNow($("express-form"), "express");
     return;
   }
-  if (event.target.closest("#close-express")) {
-    $("express-form").classList.add("hidden");
+  if (event.target.closest("#close-express") || event.target.closest("#cancel-edit")) {
+    closeSheets();
+    return;
+  }
+  if (event.target.classList.contains("sheet")) {
+    closeSheets();
     return;
   }
   const inspectToggle = event.target.closest(".toggle-inspect");
@@ -867,7 +883,7 @@ document.addEventListener("click", async (event) => {
       pickers.appt.time = form.time.value;
       await bindPicker("appt");
       showPane("appts");
-      openForm("appt-form", ["express-form"]);
+      openSheet("appt-sheet");
       form.querySelector("button[type=submit]").textContent = "ذخیره نوبت";
       return;
     }

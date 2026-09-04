@@ -355,6 +355,7 @@ $("profile-form").addEventListener("submit", async (event) => {
       }),
     });
     if (msg) msg.textContent = "پروفایل ذخیره شد.";
+    $("profile-sheet") && $("profile-sheet").classList.add("hidden");
     refresh();
   } catch (error) {
     if (msg) msg.textContent = error.message;
@@ -372,7 +373,16 @@ $("logout-btn").addEventListener("click", async () => {
 document.addEventListener("click", async (event) => {
   const tab = event.target.closest("[data-tab]");
   if (tab) {
+    $("profile-sheet") && $("profile-sheet").classList.add("hidden");
     showPane(tab.getAttribute("data-tab"));
+    return;
+  }
+  if (event.target.closest("#open-profile")) {
+    $("profile-sheet").classList.remove("hidden");
+    return;
+  }
+  if (event.target.closest("#close-profile") || event.target.id === "profile-sheet") {
+    $("profile-sheet").classList.add("hidden");
     return;
   }
   if (event.target.closest("#hist-prev")) {

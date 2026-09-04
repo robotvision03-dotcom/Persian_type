@@ -6,8 +6,8 @@
     <title>پورتال خریدار</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=26" />
-    <link rel="stylesheet" href="/static/portal.css?v=26" />
+    <link rel="stylesheet" href="/static/styles.css?v=27" />
+    <link rel="stylesheet" href="/static/portal.css?v=27" />
   </head>
   <body class="portal-page">
     <div class="backdrop"></div>
@@ -62,8 +62,12 @@
           <div class="day-nav" id="hist-pages"></div>
         </section>
         <section class="panel pane" data-pane="account">
+          <div class="actions">
+            <button class="ghost" id="open-profile" type="button">ویرایش پروفایل</button>
+          </div>
           <p id="appts" class="empty">نوبتی نیست.</p>
-          <form id="profile-form" class="vehicle-form">
+          <div id="profile-sheet" class="sheet hidden">
+          <form id="profile-form" class="vehicle-form sheet-box">
             <h4>ویرایش پروفایل</h4>
             <label class="spec-field"><span>نام خریدار</span><input name="contact_person" required /></label>
             <label class="spec-field"><span>کد ملی</span><input name="national_id" inputmode="numeric" /></label>
@@ -72,12 +76,16 @@
             <label class="spec-field"><span>کسب‌وکار</span><input name="business_name" /></label>
             <label class="spec-field"><span>شهر</span><input name="city" /></label>
             <label class="spec-field wide"><span>نشانی</span><input name="address" /></label>
-            <button class="start" type="submit">ذخیره پروفایل</button>
+            <div class="actions">
+              <button class="start" type="submit">ذخیره پروفایل</button>
+              <button class="ghost" id="close-profile" type="button">بستن</button>
+            </div>
             <p id="profile-msg" class="hint"></p>
           </form>
+          </div>
         </section>
       </div>
     </main>
-    <script src="/static/buyer.js?v=26"></script>
+    <script src="/static/buyer.js?v=27"></script>
   </body>
 </html>

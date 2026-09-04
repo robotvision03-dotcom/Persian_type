@@ -52,6 +52,28 @@
   margin-top: 10px;
 }
 
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 28px 12px 40px;
+  background: rgba(8, 16, 12, 0.62);
+  overflow: auto;
+}
+
+.sheet-box {
+  width: min(420px, 100%);
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+  background: #14241c;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
 .portal .stack {
   display: grid;
   gap: 10px;

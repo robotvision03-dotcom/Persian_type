@@ -6,8 +6,8 @@
     <title>دفتر مرکز</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=26" />
-    <link rel="stylesheet" href="/static/portal.css?v=26" />
+    <link rel="stylesheet" href="/static/styles.css?v=27" />
+    <link rel="stylesheet" href="/static/portal.css?v=27" />
   </head>
   <body class="portal-page">
     <div class="backdrop"></div>
@@ -52,7 +52,8 @@
             <button class="ghost" id="open-appt" type="button">ثبت نوبت</button>
             <button class="start" id="open-express" type="button">ثبت فوری</button>
           </div>
-          <form id="appt-form" class="vehicle-form hidden">
+          <div id="appt-sheet" class="sheet hidden">
+          <form id="appt-form" class="vehicle-form sheet-box">
             <input type="hidden" name="appointment_id" value="" />
             <input type="hidden" name="date" id="appt-date" required />
             <input type="hidden" name="time" id="appt-time" required />
@@ -81,8 +82,10 @@
               <button class="ghost" id="cancel-edit" type="button">بستن</button>
             </div>
           </form>
-          <form id="express-form" class="vehicle-form hidden">
-            <h4>ثبت فوری / مزایده فوری</h4>
+          </div>
+          <div id="express-sheet" class="sheet hidden">
+          <form id="express-form" class="vehicle-form sheet-box">
+            <h4>ثبت فوری</h4>
             <input type="hidden" name="date" />
             <input type="hidden" name="time" />
             <div class="picker" data-picker="express">
@@ -114,6 +117,7 @@
               <button class="ghost" id="close-express" type="button">بستن</button>
             </div>
           </form>
+          </div>
           <div id="appts"></div>
         </section>
         <section class="panel pane" data-pane="cars">
@@ -148,6 +152,6 @@
         </section>
       </div>
     </main>
-    <script src="/static/office.js?v=26"></script>
+    <script src="/static/office.js?v=27"></script>
   </body>
 </html>
