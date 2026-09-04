@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from .numbers import digitize_text, extract_ints
+
 _DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 _ARABIC = str.maketrans("يكةأإآؤ", "یکهئااا")
 _PUNCT = re.compile(r"[،,.!?؟:;\"'`_\-]+")
@@ -150,9 +152,9 @@ CATALOG: tuple[CarBrand, ...] = (
         "پژو",
         "فرانسه",
         ("پژو", "پژ", "peugeot", "peugeote", "peguete", "pegete", "peugeut"),
-        _m("206", "206", "۲۰۶", "دو صد و شش"),
-        _m("207", "207", "۲۰۷"),
-        _m("405", "405", "۴۰۵"),
+        _m("206", "206", "۲۰۶", "دو صد و شش", "دویست و شش", "دویست شش", "دو صفر شش", "دو شش"),
+        _m("207", "207", "۲۰۷", "دویست و هفت", "دو صفر هفت"),
+        _m("405", "405", "۴۰۵", "چهارصد و پنج", "چهار صفر پنج"),
         _m("پارس", "پارس", "pars", "elx", "پارس ELX"),
         _m("2008", "2008", "۲۰۰۸"),
         _m("508", "508", "۵۰۸"),
@@ -378,12 +380,33 @@ CATALOG: tuple[CarBrand, ...] = (
 
 _BRAND_INDEX: list[tuple[CarBrand, str]] = []
 _MODEL_INDEX: list[tuple[CarBrand, CarModel, str]] = []
+_NUMERIC_MODELS: dict[str, list[tuple[CarBrand, CarModel]]] = {}
 for _brand in CATALOG:
     for _alias in (_brand.name, *_brand.aliases):
         _BRAND_INDEX.append((_brand, fold(_alias)))
     for _model in _brand.models:
         for _alias in (_model.name, *_model.aliases):
             _MODEL_INDEX.append((_brand, _model, fold(_alias)))
+        for _alias in (_model.name, *_model.aliases):
+            digits = compact(_alias)
+            if digits.isdigit():
+                _NUMERIC_MODELS.setdefault(str(int(digits)), []).append((_brand, _model))
+
+
+def lookup_numeric_model(value: int, prefer_brand: str | None = None) -> list[tuple[CarBrand, CarModel]]:
+    hits = list(_NUMERIC_MODELS.get(str(value), []))
+    if prefer_brand:
+        preferred = [item for item in hits if item[0].name == prefer_brand]
+        if preferred:
+            return preferred
+    unique: list[tuple[CarBrand, CarModel]] = []
+    seen: set[tuple[str, str]] = set()
+    for brand, model in hits:
+        key = (brand.name, model.name)
+        if key not in seen:
+            seen.add(key)
+            unique.append((brand, model))
+    return unique
 
 
 def _best_unique(query: str, scored: list[tuple[int, str, Any]]) -> tuple[int, str, Any] | None:
@@ -408,10 +431,12 @@ def _best_unique(query: str, scored: list[tuple[int, str, Any]]) -> tuple[int, s
 
 def match_vehicle(text: str, prefer_brand: str | None = None) -> VehicleHit:
     raw = fold(text)
-    if not raw:
+    digitized = digitize_text(text)
+    if not raw and not digitized:
         return VehicleHit()
 
-    tokens = [raw, *raw.split()]
+    tokens = [raw, digitized, *raw.split(), *digitized.split()]
+    tokens = [tok for tok in tokens if tok]
     brand_scores: list[tuple[int, str, CarBrand]] = []
     for brand, alias in _BRAND_INDEX:
         best = 0
@@ -458,6 +483,20 @@ def match_vehicle(text: str, prefer_brand: str | None = None) -> VehicleHit:
 
     if result.brand and result.model is None and model_hit and model_hit[2][0].name == result.brand:
         result.model = model_hit[2][1].name
+
+    if result.model is None or result.brand is None:
+        for value in extract_ints(text) + [int(tok) for tok in digitized.split() if tok.isdigit()]:
+            numeric = lookup_numeric_model(value, prefer_brand)
+            if len(numeric) == 1:
+                brand, model = numeric[0]
+                if result.brand in {None, brand.name}:
+                    result.brand = brand.name
+                    result.model = model.name
+                    result.origin = brand.origin
+                    result.score = max(result.score, 100)
+                    break
+            elif len(numeric) > 1 and not result.brand:
+                result.candidates = [f"{brand.name} {model.name}" for brand, model in numeric[:5]]
 
     if not result.brand:
         names = sorted({item[1] for item in brand_scores if item[0] >= 72})

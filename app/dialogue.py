@@ -11,8 +11,12 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
+from datetime import date
+
 from . import booking
 from .cars import brand_models
+from .jalali import format_jalali
+from .numbers import parse_clock
 from .nlu import (
     NO_WORDS,
     PHASE_ASK_CAR,
@@ -182,10 +186,21 @@ class DialogueManager:
                 return self._reply(session, text, "وقتی برای تأیید ندارم. تماس را از نو شروع کنید.")
             return self._book(session, session.offered_slots[0], text)
         picked = None
+        wanted = parse_clock(text)
         for item in session.offered_slots:
             if item["time"] in text or item["date"] in text or item["label"] in text:
                 picked = item
                 break
+            if wanted and item["time"] == wanted:
+                picked = item
+                break
+        if picked is None and wanted:
+            days = [item["date"] for item in session.offered_slots] or [booking.next_open_date().isoformat()]
+            for iso in days:
+                if wanted in booking.available_slots(iso, db_path=self.db_path):
+                    day = date.fromisoformat(iso)
+                    picked = {"date": iso, "time": wanted, "label": f"{format_jalali(day)} ساعت {wanted}"}
+                    break
         if picked is None:
             return self._reply(
                 session,

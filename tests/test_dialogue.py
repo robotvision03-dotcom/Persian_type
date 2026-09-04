@@ -59,6 +59,16 @@ class DialogueTests(unittest.TestCase):
             self.assertEqual(turn["reply"], ASK_KM)
             self.assertEqual(turn["customer"]["car_model"], "206")
 
+    def test_spoken_206_skips_to_km(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = DialogueManager(db_path=Path(tmp) / "book.sqlite")
+            manager.start("s1")
+            turn = manager.handle("s1", "دویست و شش")
+            self.assertEqual(turn["customer"]["car_name"], "پژو")
+            self.assertEqual(turn["customer"]["car_model"], "206")
+            self.assertEqual(turn["phase"], "ask_km")
+            self.assertEqual(turn["reply"], ASK_KM)
+
     def test_partial_samand_letters(self):
         with tempfile.TemporaryDirectory() as tmp:
             manager = DialogueManager(db_path=Path(tmp) / "book.sqlite")

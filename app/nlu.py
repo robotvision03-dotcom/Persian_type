@@ -12,6 +12,7 @@ import re
 from typing import Any
 
 from .cars import match_vehicle
+from .numbers import digitize_text, extract_ints, parse_int
 
 PHASE_ASK_CAR = "ask_car"
 PHASE_ASK_MODEL = "ask_model"
@@ -32,7 +33,14 @@ ZERO_WORDS = ("صفر", "نو", "صفر کیلومتر", "کارخانه")
 def parse_km(text: str) -> int | None:
     if not text:
         return None
-    spaced = text.translate(_DIGITS).replace(",", "").replace("٬", "")
+    values = extract_ints(text)
+    large = [item for item in values if item >= 1000]
+    if large:
+        return max(large)
+    spoken = parse_int(text)
+    if spoken is not None:
+        return spoken
+    spaced = digitize_text(text).translate(_DIGITS).replace(",", "").replace("٬", "")
     numbers = [int(item) for item in re.findall(r"\d+", spaced)]
     if not numbers:
         return None
