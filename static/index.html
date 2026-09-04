@@ -10,18 +10,19 @@
       href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/static/styles.css?v=3" />
+    <link rel="stylesheet" href="/static/styles.css?v=4" />
   </head>
   <body>
     <div class="backdrop"></div>
     <header class="topbar">
       <div>
-        <p class="eyebrow">Call Simulator</p>
+        <p class="eyebrow">Live Voice Agent</p>
         <h1>رزرو نوبت کارشناسی خودرو</h1>
         <p class="lede">
-          مشتری تماس می‌گیرد. منشی با
+          یک دکمه تماس. منشی سؤال کوتاه می‌پرسد، شما جواب می‌دهید، سؤال بعدی همان لحظه می‌آید.
+          اگر بگویید پژو ۲۰۶، مدل را رد می‌کند و کارکرد را می‌پرسد. شنوا کوچیک CTC و
           <strong>llama3.2:3b</strong>
-          و شنوا کوچیک CTC به فارسی نوبت می‌گیرد. دفتر دوشنبه تا جمعه، ساعت ۹ تا ۱۷.
+          — دفتر دوشنبه تا جمعه، ۹ تا ۱۷.
         </p>
       </div>
       <div class="pills">
@@ -34,14 +35,13 @@
     <main class="workspace dealership">
       <section class="panel call-panel">
         <div class="panel-head">
-          <h2>شبیه‌ساز تماس</h2>
-          <button type="button" id="new-call" class="ghost">تماس جدید</button>
+          <h2>تماس زنده</h2>
+          <span id="call-state" class="hint">برای شروع، تماس را بزنید</span>
         </div>
         <div id="log" class="call-log"></div>
         <form id="composer" class="composer">
-          <button type="button" id="start-btn" class="start" disabled>صحبت کن</button>
-          <button type="button" id="stop-btn" class="stop" disabled>توقف</button>
-          <input id="text-input" type="text" placeholder="پاسخ مشتری را بنویسید..." autocomplete="off" />
+          <button type="button" id="call-btn" class="start">شروع تماس</button>
+          <input id="text-input" type="text" placeholder="یا پاسخ را بنویسید..." autocomplete="off" />
           <button type="submit" class="ghost">ارسال</button>
         </form>
         <div class="meter"><span id="level-bar"></span></div>
@@ -74,6 +74,6 @@
       <div class="spinner"></div>
       <p id="overlay-text">در حال آماده‌سازی...</p>
     </div>
-    <script src="/static/app.js?v=3"></script>
+    <script src="/static/app.js?v=4"></script>
   </body>
 </html>

@@ -3,12 +3,17 @@ const $ = (id) => document.getElementById(id);
 const MONTHS = ["فروردین","اردیبهشت","خرداد","تیر","مرداد","شهریور","مهر","آبان","آذر","دی","بهمن","اسفند"];
 const sessionId = "call-" + Math.random().toString(36).slice(2, 8);
 
+const SPEECH_RMS = 0.018;
+const SILENCE_MS = 720;
+const MIN_SPEECH_MS = 280;
+const MAX_UTTERANCE_MS = 14000;
+
 const logEl = $("log");
 const textInput = $("text-input");
 const statusLine = $("status-line");
 const asrChip = $("asr-chip");
-const startBtn = $("start-btn");
-const stopBtn = $("stop-btn");
+const callBtn = $("call-btn");
+const callState = $("call-state");
 const partialLine = $("partial-line");
 const overlay = $("overlay");
 const overlayText = $("overlay-text");
@@ -23,7 +28,12 @@ let mediaStream = null;
 let audioContext = null;
 let processor = null;
 let sourceNode = null;
-let recording = false;
+let inCall = false;
+let awaitingTurn = false;
+let speaking = false;
+let speechStartedAt = 0;
+let lastLoudAt = 0;
+let lastEndpointAt = 0;
 
 function setOverlay(visible, message) {
   overlay.classList.toggle("hidden", !visible);
@@ -46,11 +56,30 @@ function addMsg(role, text, meta) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+function speakFa(text) {
+  if (!text || !window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "fa-IR";
+  utterance.rate = 1.05;
+  const voices = window.speechSynthesis.getVoices() || [];
+  const persian = voices.find((voice) => (voice.lang || "").toLowerCase().startsWith("fa"));
+  if (persian) utterance.voice = persian;
+  window.speechSynthesis.speak(utterance);
+}
+
+function setCallUi(live) {
+  inCall = live;
+  callBtn.textContent = live ? "پایان تماس" : "شروع تماس";
+  callBtn.classList.toggle("live", live);
+  callBtn.classList.toggle("start", !live);
+  callState.textContent = live ? "تماس فعال — بعد از هر جواب، سؤال بعدی می‌آید" : "برای شروع، تماس را بزنید";
+}
+
 function applyState(next) {
   state = next;
   if (next.asr) asrChip.textContent = next.asr.name_fa || "شنوا کوچیک CTC";
   statusLine.textContent = next.status || "";
-  startBtn.disabled = !next.ready || recording;
 }
 
 async function fetchState() {
@@ -58,35 +87,44 @@ async function fetchState() {
   applyState(await response.json());
 }
 
-async function startCall() {
+function applyTurn(payload, userText) {
+  if (userText) addMsg("user", userText, "مشتری");
+  if (payload?.reply) {
+    addMsg("agent", payload.reply, "منشی");
+    speakFa(payload.reply);
+  }
+  if (payload?.appointment_id) loadAppts();
+  loadCalendar();
+  if (payload?.phase === "booked") {
+    statusLine.textContent = "نوبت ثبت شد";
+    if (inCall) hangup();
+  }
+}
+
+async function beginSession() {
   logEl.innerHTML = "";
   const payload = await fetch("/api/call/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id: sessionId, text: "" }),
+    body: JSON.stringify({ session_id: sessionId }),
   }).then((r) => r.json());
   addMsg("agent", payload.reply, "منشی");
+  speakFa(payload.reply);
+  return payload;
 }
 
 $("composer").addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = textInput.value.trim();
   if (!text) return;
-  addMsg("user", text, "مشتری");
+  if (!inCall) await startCall();
   textInput.value = "";
   const payload = await fetch("/api/call/turn", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ session_id: sessionId, text }),
   }).then((r) => r.json());
-  addMsg("agent", payload.reply, "منشی");
-  if (payload.appointment_id) loadAppts();
-  loadCalendar();
-});
-
-$("new-call").addEventListener("click", async () => {
-  if (recording) await stopRecording();
-  await startCall();
+  applyTurn(payload, text);
 });
 
 $("weekdays").innerHTML = ["ش", "ی", "د", "س", "چ", "پ", "ج"].map((d) => `<span>${d}</span>`).join("");
@@ -218,22 +256,57 @@ function floatTo16BitPCM(float32) {
   return out;
 }
 
-function updateLevel(samples) {
+function rmsOf(samples) {
   let sum = 0;
   for (let i = 0; i < samples.length; i += 1) sum += samples[i] * samples[i];
-  const rms = Math.sqrt(sum / Math.max(1, samples.length));
-  levelBar.style.width = `${Math.min(100, Math.round(rms * 280))}%`;
+  return Math.sqrt(sum / Math.max(1, samples.length));
 }
 
-async function startRecording() {
-  if (!state?.ready) {
-    alert("برای تماس صوتی مدل شنوا لازم است. می‌توانید پاسخ را تایپ کنید.");
+function updateLevel(samples) {
+  levelBar.style.width = `${Math.min(100, Math.round(rmsOf(samples) * 280))}%`;
+}
+
+function sendEndpoint() {
+  if (!socket || socket.readyState !== WebSocket.OPEN || awaitingTurn) return;
+  const now = performance.now();
+  if (now - lastEndpointAt < 400) return;
+  lastEndpointAt = now;
+  awaitingTurn = true;
+  speaking = false;
+  partialLine.textContent = "در حال فهمیدن جواب...";
+  socket.send(JSON.stringify({ type: "endpoint", session_id: sessionId }));
+}
+
+function onAudioFrame(input) {
+  updateLevel(input);
+  if (!inCall || !socket || socket.readyState !== WebSocket.OPEN) return;
+  const pcm = floatTo16BitPCM(downsample(input, audioContext.sampleRate, 16000));
+  socket.send(pcm.buffer);
+  if (awaitingTurn) return;
+  const rms = rmsOf(input);
+  const now = performance.now();
+  if (rms >= SPEECH_RMS) {
+    if (!speaking) {
+      speaking = true;
+      speechStartedAt = now;
+      window.speechSynthesis && window.speechSynthesis.cancel();
+      partialLine.textContent = "در حال شنیدن...";
+    }
+    lastLoudAt = now;
+    if (now - speechStartedAt >= MAX_UTTERANCE_MS) sendEndpoint();
     return;
   }
+  if (speaking && now - speechStartedAt >= MIN_SPEECH_MS && now - lastLoudAt >= SILENCE_MS) {
+    sendEndpoint();
+  }
+}
+
+async function startListening() {
   mediaStream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
   });
   audioContext = new AudioContext();
+  if (audioContext.state === "suspended") await audioContext.resume();
   sourceNode = audioContext.createMediaStreamSource(mediaStream);
   processor = audioContext.createScriptProcessor(4096, 1, 1);
   const protocol = location.protocol === "https:" ? "wss" : "ws";
@@ -243,37 +316,33 @@ async function startRecording() {
     socket.addEventListener("open", resolve, { once: true });
     socket.addEventListener("error", () => reject(new Error("اتصال زنده برقرار نشد")), { once: true });
   });
-  socket.send(JSON.stringify({ session_id: sessionId }));
+  socket.send(JSON.stringify({ type: "start", session_id: sessionId }));
   socket.addEventListener("message", (event) => {
     const message = JSON.parse(event.data);
-    if (message.type === "partial") partialLine.textContent = message.text || "";
+    if (message.type === "partial") partialLine.textContent = message.text || "در حال شنیدن...";
     if (message.type === "status") statusLine.textContent = message.message;
-    if (message.type === "error") statusLine.textContent = message.message;
-    if (message.type === "final") {
-      if (message.text) addMsg("user", message.text, "مشتری · گفتار");
-      if (message.turn?.reply) {
-        addMsg("agent", message.turn.reply, "منشی");
-        if (message.turn.appointment_id) loadAppts();
-        loadCalendar();
-      }
-      partialLine.textContent = "";
+    if (message.type === "error") {
+      statusLine.textContent = message.message;
+      awaitingTurn = false;
+    }
+    if (message.type === "ignore") {
+      awaitingTurn = false;
+      partialLine.textContent = inCall ? "گوش می‌دهم..." : "";
+    }
+    if (message.type === "assistant") {
+      awaitingTurn = false;
+      partialLine.textContent = inCall ? "گوش می‌دهم..." : "";
+      applyTurn(message.turn, message.text);
     }
   });
   processor.onaudioprocess = (event) => {
-    if (!recording || !socket || socket.readyState !== WebSocket.OPEN) return;
-    const input = event.inputBuffer.getChannelData(0);
-    updateLevel(input);
-    const pcm = floatTo16BitPCM(downsample(input, audioContext.sampleRate, 16000));
-    socket.send(pcm.buffer);
+    onAudioFrame(event.inputBuffer.getChannelData(0));
   };
   const mute = audioContext.createGain();
   mute.gain.value = 0;
   sourceNode.connect(processor);
   processor.connect(mute);
   mute.connect(audioContext.destination);
-  recording = true;
-  startBtn.disabled = true;
-  stopBtn.disabled = false;
 }
 
 function teardownAudio() {
@@ -288,38 +357,69 @@ function teardownAudio() {
   levelBar.style.width = "0%";
 }
 
-async function stopRecording() {
-  recording = false;
-  stopBtn.disabled = true;
-  startBtn.disabled = !state?.ready;
+async function hangup() {
+  awaitingTurn = false;
+  speaking = false;
+  window.speechSynthesis && window.speechSynthesis.cancel();
   if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify({ type: "stop", session_id: sessionId }));
-    await new Promise((resolve) => {
-      const timer = setTimeout(resolve, 120000);
-      socket.addEventListener("close", () => { clearTimeout(timer); resolve(); }, { once: true });
-    });
+    try {
+      socket.send(JSON.stringify({ type: "hangup", session_id: sessionId }));
+    } catch (_error) {}
+    socket.close();
   }
   socket = null;
   teardownAudio();
+  try {
+    await fetch("/api/call/hangup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  } catch (_error) {}
+  partialLine.textContent = "";
+  setCallUi(false);
+  statusLine.textContent = "تماس تمام شد";
 }
 
-startBtn.addEventListener("click", () => startRecording().catch((error) => {
-  alert(error.message);
-  teardownAudio();
-}));
-stopBtn.addEventListener("click", () => stopRecording());
+async function startCall() {
+  if (inCall) return;
+  setCallUi(true);
+  awaitingTurn = false;
+  speaking = false;
+  await beginSession();
+  if (state?.ready) {
+    try {
+      await startListening();
+      partialLine.textContent = "گوش می‌دهم...";
+      statusLine.textContent = "گوش می‌دهم...";
+    } catch (error) {
+      statusLine.textContent = error.message + " — می‌توانید تایپ کنید.";
+    }
+  } else {
+    statusLine.textContent = "گفتار آماده نیست؛ پاسخ را بنویسید.";
+  }
+}
+
+callBtn.addEventListener("click", () => {
+  if (inCall) {
+    hangup().catch((error) => alert(error.message));
+    return;
+  }
+  startCall().catch((error) => {
+    alert(error.message);
+    hangup();
+  });
+});
 
 async function boot() {
   setOverlay(true, "در حال آماده‌سازی دفتر...");
   try {
     const payload = await fetch("/api/boot", { method: "POST" }).then((r) => r.json());
     applyState(payload);
-    await startCall();
     await loadCalendar();
     await loadAppts();
   } catch (error) {
     statusLine.textContent = error.message;
-    await startCall();
     await loadCalendar();
   } finally {
     setOverlay(false);

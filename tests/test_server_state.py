@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,8 +6,15 @@ from unittest.mock import patch
 
 import numpy as np
 
-from app.dialogue import GREETING
-from app.server import AppState
+from app.dialogue import ASK_KM, GREETING
+from app.server import AppState, app, reset_state
+
+try:
+    from fastapi.testclient import TestClient
+except Exception:  # starlette may require httpx/httpx2
+    TestClient = None
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 class DummyEngine:
@@ -67,6 +75,37 @@ class AppStateTests(unittest.TestCase):
             self.assertFalse(snapshot["ready"])
             started = app_state.dialogue.start("x")
             self.assertEqual(started["reply"], GREETING)
+
+    def test_ui_has_single_call_button(self):
+        html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("شروع تماس", html)
+        self.assertIn('id="call-btn"', html)
+        self.assertNotIn("صحبت کن", html)
+        self.assertNotIn('id="stop-btn"', html)
+        self.assertNotIn('id="start-btn"', html)
+
+    @unittest.skipUnless(TestClient, "httpx is required for the live websocket test")
+    def test_live_endpoint_asks_next_question_immediately(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_shenava_dir(root)
+            app_state = reset_state(root, db_path=root / "book.sqlite")
+            dummy = DummyEngine()
+            dummy.transcribe = lambda audio, sample_rate=16000: "peugeot 206"
+            app_state.engine = dummy
+            app_state.dialogue.start("live1")
+            client = TestClient(app)
+            with client.websocket_connect("/ws/stream") as ws:
+                self.assertEqual(ws.receive_json()["type"], "status")
+                ws.send_text(json.dumps({"session_id": "live1", "type": "start"}))
+                ws.send_bytes(np.zeros(int(16000 * 0.3), dtype=np.int16).tobytes())
+                ws.send_text(json.dumps({"type": "endpoint", "session_id": "live1"}))
+                message = ws.receive_json()
+                self.assertEqual(message["type"], "assistant")
+                self.assertEqual(message["text"], "peugeot 206")
+                self.assertEqual(message["turn"]["phase"], "ask_km")
+                self.assertEqual(message["turn"]["reply"], ASK_KM)
+                ws.send_text(json.dumps({"type": "hangup", "session_id": "live1"}))
 
 
 if __name__ == "__main__":

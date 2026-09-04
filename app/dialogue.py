@@ -1,32 +1,44 @@
-"""Call-simulator dialogue for car-dealership appointment booking."""
+"""Call-simulator dialogue for car-dealership appointment booking.
+
+Short ask–answer turns: one missing slot per question, but a customer
+utterance may over-answer (fill several slots). The next prompt is always
+the first unfilled slot, so “peugeot 206” skips the model question.
+"""
 
 from __future__ import annotations
 
-import re
 import threading
 from dataclasses import dataclass, field
 from typing import Any
 
 from . import booking
-from .ollama import OllamaError, extract_answer
-
-PHASE_ASK_CAR = "ask_car"
-PHASE_ASK_MODEL = "ask_model"
-PHASE_ASK_KM = "ask_km"
-PHASE_ASK_NAME = "ask_name"
-PHASE_ASK_SLOT = "ask_slot"
-PHASE_BOOKED = "booked"
+from .nlu import (
+    NO_WORDS,
+    PHASE_ASK_CAR,
+    PHASE_ASK_KM,
+    PHASE_ASK_MODEL,
+    PHASE_ASK_NAME,
+    PHASE_ASK_SLOT,
+    PHASE_BOOKED,
+    YES_WORDS,
+    next_missing_phase,
+    parse_km,
+    parse_slots,
+)
 
 GREETING = "سلام وقت بخیر. لطفا اسم خودروی خود را بگویی."
+ASK_CAR = GREETING
 ASK_MODEL = "مدل خودروی شما چیست؟"
 ASK_KM = "کارکرد خودرو به کیلومتر."
 ASK_NAME = "نام و نام خانوادگی چیست؟"
 ASK_REPEAT = "متوجه نشدم. لطفا کوتاه‌تر بفرمایید."
 
-YES_WORDS = ("بله", "آره", "اره", "باشه", "باشِ", "موافقم", "چشم", "حتما", "اوکی", "ok", "yes")
-NO_WORDS = ("نه", "نخیر", "خیر", "نمیخوام", "نمی‌خوام", "no")
-
-_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+PROMPTS = {
+    PHASE_ASK_CAR: ASK_CAR,
+    PHASE_ASK_MODEL: ASK_MODEL,
+    PHASE_ASK_KM: ASK_KM,
+    PHASE_ASK_NAME: ASK_NAME,
+}
 
 
 @dataclass
@@ -40,6 +52,7 @@ class CallSession:
     offered_slots: list[dict[str, str]] = field(default_factory=list)
     appointment_id: int | None = None
     messages: list[dict[str, str]] = field(default_factory=list)
+    live: bool = False
 
 
 class DialogueManager:
@@ -50,10 +63,18 @@ class DialogueManager:
 
     def start(self, session_id: str) -> dict[str, Any]:
         with self._lock:
-            session = CallSession(session_id=session_id)
+            session = CallSession(session_id=session_id, live=True)
             session.messages.append({"role": "agent", "content": GREETING})
             self._sessions[session_id] = session
             return self._payload(session, GREETING)
+
+    def hangup(self, session_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is None:
+                return None
+            session.live = False
+            return self._payload(session, "")
 
     def get(self, session_id: str) -> CallSession | None:
         with self._lock:
@@ -63,7 +84,7 @@ class DialogueManager:
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
-                session = CallSession(session_id=session_id)
+                session = CallSession(session_id=session_id, live=True)
                 self._sessions[session_id] = session
         text = (user_text or "").strip()
         if not text:
@@ -71,55 +92,57 @@ class DialogueManager:
         session.messages.append({"role": "user", "content": text})
         if session.phase == PHASE_BOOKED:
             return self._reply(session, text, "نوبت شما ثبت شده است. برای نوبت تازه، تماس جدید بزنید.")
-        if session.phase == PHASE_ASK_CAR:
-            return self._on_car(session, text)
-        if session.phase == PHASE_ASK_MODEL:
-            return self._on_model(session, text)
-        if session.phase == PHASE_ASK_KM:
-            return self._on_km(session, text)
-        if session.phase == PHASE_ASK_NAME:
-            return self._on_name(session, text)
         if session.phase == PHASE_ASK_SLOT:
             return self._on_slot(session, text)
-        return self._on_car(session, text)
 
-    def _clean(self, phase: str, text: str) -> str:
-        try:
-            cleaned = extract_answer(phase, text)
-            return cleaned or text
-        except OllamaError:
-            return text
+        slots = parse_slots(text, session.phase)
+        self._fill_slots(session, slots, text)
+        return self._prompt_next(session, text)
 
-    def _on_car(self, session: CallSession, text: str) -> dict[str, Any]:
-        value = self._clean("car", text)
-        if len(value) < 2:
+    def _fill_slots(self, session: CallSession, slots: dict[str, Any], text: str) -> None:
+        if slots.get("car_name"):
+            session.car_name = str(slots["car_name"]).strip()
+        elif session.phase == PHASE_ASK_CAR and not session.car_name:
+            value = text.strip()
+            if len(value) >= 2:
+                session.car_name = value
+
+        if slots.get("car_model"):
+            session.car_model = str(slots["car_model"]).strip()
+        elif session.phase == PHASE_ASK_MODEL and not session.car_model:
+            value = text.strip()
+            if len(value) >= 1:
+                session.car_model = value
+
+        if slots.get("km") is not None:
+            session.km = int(slots["km"])
+        elif session.phase == PHASE_ASK_KM and session.km is None:
+            km = parse_km(text)
+            if km is not None:
+                session.km = km
+
+        if slots.get("customer_name"):
+            session.customer_name = str(slots["customer_name"]).strip()
+        elif session.phase == PHASE_ASK_NAME and not session.customer_name:
+            value = text.strip()
+            if len(value) >= 2:
+                session.customer_name = value
+
+    def _prompt_next(self, session: CallSession, text: str) -> dict[str, Any]:
+        nxt = next_missing_phase(
+            session.car_name, session.car_model, session.km, session.customer_name
+        )
+        if nxt == session.phase:
+            if session.phase == PHASE_ASK_KM:
+                return self._reply(session, text, "کارکرد را به کیلومتر بگویید. مثلاً ۸۰۰۰۰.")
             return self._reply(session, text, ASK_REPEAT)
-        session.car_name = value
-        session.phase = PHASE_ASK_MODEL
-        return self._reply(session, text, ASK_MODEL)
 
-    def _on_model(self, session: CallSession, text: str) -> dict[str, Any]:
-        value = self._clean("model", text)
-        if len(value) < 1:
-            return self._reply(session, text, ASK_REPEAT)
-        session.car_model = value
-        session.phase = PHASE_ASK_KM
-        return self._reply(session, text, ASK_KM)
+        session.phase = nxt
+        if nxt == PHASE_ASK_SLOT:
+            return self._offer_slots(session, text)
+        return self._reply(session, text, PROMPTS[nxt])
 
-    def _on_km(self, session: CallSession, text: str) -> dict[str, Any]:
-        cleaned = self._clean("km", text)
-        km = parse_km(cleaned) or parse_km(text)
-        if km is None:
-            return self._reply(session, text, "کارکرد را به کیلومتر بگویید. مثلاً ۸۰۰۰۰.")
-        session.km = km
-        session.phase = PHASE_ASK_NAME
-        return self._reply(session, text, ASK_NAME)
-
-    def _on_name(self, session: CallSession, text: str) -> dict[str, Any]:
-        value = self._clean("name", text)
-        if len(value) < 2:
-            return self._reply(session, text, ASK_REPEAT)
-        session.customer_name = value
+    def _offer_slots(self, session: CallSession, text: str) -> dict[str, Any]:
         slots = booking.next_open_slots(limit=3, db_path=self.db_path)
         session.offered_slots = slots
         session.phase = PHASE_ASK_SLOT
@@ -145,19 +168,11 @@ class DialogueManager:
             if not session.offered_slots:
                 return self._reply(session, text, "وقتی برای تأیید ندارم. تماس را از نو شروع کنید.")
             return self._book(session, session.offered_slots[0], text)
-        cleaned = self._clean("slot", text)
         picked = None
         for item in session.offered_slots:
-            if item["time"] in cleaned or item["time"] in text or item["date"] in text:
+            if item["time"] in text or item["date"] in text or item["label"] in text:
                 picked = item
                 break
-            if item["label"] in text:
-                picked = item
-                break
-        if picked is None and session.offered_slots:
-            # fall back to first slot if the customer just confirmed vaguely
-            if any(word in cleaned for word in YES_WORDS):
-                picked = session.offered_slots[0]
         if picked is None:
             return self._reply(
                 session,
@@ -181,6 +196,7 @@ class DialogueManager:
             return self._reply(session, text, str(extra))
         session.appointment_id = appt_id
         session.phase = PHASE_BOOKED
+        session.live = False
         reply = (
             f"نوبت ثبت شد. {session.customer_name}، {session.car_name} {session.car_model} "
             f"با کارکرد {session.km} کیلومتر، {slot['label']}."
@@ -205,18 +221,5 @@ class DialogueManager:
                 "km": session.km,
             },
             "messages": list(session.messages),
+            "live": session.live,
         }
-
-
-def parse_km(text: str) -> int | None:
-    if not text:
-        return None
-    normalized = text.translate(_DIGITS).replace(",", "").replace("٬", "").replace(" ", "")
-    numbers = re.findall(r"\d+", normalized)
-    if not numbers:
-        return None
-    value = int(numbers[0])
-    if "هزار" in text or "هزار" in normalized:
-        if value < 1000:
-            value *= 1000
-    return value if value >= 0 else None

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import threading
 from pathlib import Path
 from typing import Any
@@ -33,6 +35,10 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 class StartBody(BaseModel):
     session_id: str = ""
+
+
+class HangupBody(BaseModel):
+    session_id: str = Field(..., min_length=1)
 
 
 class TurnBody(BaseModel):
@@ -174,6 +180,21 @@ def call_turn(body: TurnBody) -> dict[str, Any]:
     return payload
 
 
+@app.post("/api/call/hangup")
+def call_hangup(body: HangupBody) -> dict[str, Any]:
+    payload = state.dialogue.hangup(body.session_id) or {
+        "reply": "",
+        "phase": "ended",
+        "live": False,
+        "messages": [],
+        "customer": {},
+        "offered_slots": [],
+        "appointment_id": None,
+    }
+    payload["session_id"] = body.session_id
+    return payload
+
+
 @app.get("/api/calendar")
 def get_calendar(year: int | None = None, month: int | None = None) -> dict[str, Any]:
     return month_calendar(year, month, db_path=state.db_path)
@@ -215,18 +236,47 @@ def post_book(body: BookBody) -> dict[str, Any]:
 
 
 @app.websocket("/ws/stream")
-async def stream_transcription(websocket: WebSocket) -> None:
+async def stream_call(websocket: WebSocket) -> None:
+    """Persistent duplex call: keep listening; each VAD endpoint is one short turn."""
     await websocket.accept()
-    chunks = []
+    chunks: list = []
     session_id = ""
     engine: Engine | None = None
     with state.lock:
         engine = state.engine
         if engine is None:
-            await websocket.send_json({"type": "error", "message": "مدل شنوا برای تماس صوتی آماده نیست. متن را تایپ کنید."})
+            await websocket.send_json(
+                {"type": "error", "message": "مدل شنوا برای تماس صوتی آماده نیست. متن را تایپ کنید."}
+            )
             await websocket.close()
             return
-        engine.start_stream()
+        if engine.supports_stream:
+            engine.start_stream()
+
+    async def commit_utterance() -> None:
+        nonlocal chunks
+        full = concat(chunks)
+        chunks = []
+        if engine is not None and engine.supports_stream:
+            try:
+                engine.end_stream()
+                engine.start_stream()
+            except Exception:
+                pass
+        if full.size < TARGET_RATE * 0.18:
+            await websocket.send_json({"type": "ignore"})
+            return
+        try:
+            text_out = await asyncio.to_thread(state.transcribe, full)
+        except Exception as extra:
+            await websocket.send_json({"type": "error", "message": str(extra)})
+            return
+        text_out = (text_out or "").strip()
+        if not text_out or not session_id:
+            await websocket.send_json({"type": "ignore", "text": text_out})
+            return
+        turn = await asyncio.to_thread(state.dialogue.handle, session_id, text_out)
+        await websocket.send_json({"type": "assistant", "text": text_out, "turn": turn})
 
     try:
         await websocket.send_json({"type": "status", "message": "گوش می‌دهم..."})
@@ -238,19 +288,20 @@ async def stream_transcription(websocket: WebSocket) -> None:
             text = message.get("text")
             if text:
                 raw = text.strip()
+                payload: dict[str, Any] = {}
                 if raw.startswith("{"):
-                    import json
-
                     try:
-                        payload = json.loads(raw)
-                        session_id = payload.get("session_id") or session_id
-                        if payload.get("type") in {"stop", "end"}:
-                            break
+                        parsed = json.loads(raw)
+                        if isinstance(parsed, dict):
+                            payload = parsed
                     except json.JSONDecodeError:
-                        if raw.lower() in {"stop", "end"}:
-                            break
-                elif raw.lower() in {"stop", "end"}:
+                        payload = {}
+                session_id = str(payload.get("session_id") or session_id)
+                kind = str(payload.get("type") or raw.lower())
+                if kind in {"hangup", "stop", "end"}:
                     break
+                if kind == "endpoint":
+                    await commit_utterance()
                 continue
             if not data:
                 continue
@@ -260,32 +311,16 @@ async def stream_transcription(websocket: WebSocket) -> None:
             chunks.append(audio)
             if engine.supports_stream:
                 partial = engine.feed(audio, TARGET_RATE)
-                await websocket.send_json({"type": "partial", "text": partial})
+                if partial:
+                    await websocket.send_json({"type": "partial", "text": partial})
     except WebSocketDisconnect:
         pass
     finally:
-        full = concat(chunks)
-        text_out = ""
-        if engine is not None:
+        if engine is not None and engine.supports_stream:
             try:
-                if engine.supports_stream:
-                    engine.end_stream()
-                if full.size:
-                    text_out = state.transcribe(full)
-            except Exception as extra:
-                await websocket.send_json({"type": "error", "message": str(extra)})
-                await websocket.close()
-                return
-        turn = None
-        if text_out and session_id:
-            turn = state.dialogue.handle(session_id, text_out)
-        await websocket.send_json(
-            {
-                "type": "final",
-                "text": text_out,
-                "turn": turn,
-            }
-        )
+                engine.end_stream()
+            except Exception:
+                pass
         try:
             await websocket.close()
         except Exception:

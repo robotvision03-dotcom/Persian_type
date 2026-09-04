@@ -226,10 +226,22 @@ button,
   font-weight: 700;
 }
 
-.start {
+.start,
+.call-btn {
   background: linear-gradient(180deg, var(--teal-bright), var(--teal));
   color: white;
-  min-width: 128px;
+  min-width: 148px;
+}
+
+#call-btn.live {
+  background: linear-gradient(180deg, #d45b4d, var(--stop));
+  animation: pulse-call 1.6s ease infinite;
+}
+
+@keyframes pulse-call {
+  50% {
+    box-shadow: 0 0 0 6px rgba(179, 57, 45, 0.18);
+  }
 }
 
 .stop {
