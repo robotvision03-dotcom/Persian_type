@@ -161,7 +161,7 @@ def detect_engine(path: Path) -> tuple[EngineKind, dict[str, str], str]:
         return "vosk", {"model_dir": str(path)}, "تشخیص زنده با Vosk"
 
     if (path / "model.bin").exists() and (path / "config.json").exists():
-        return "whisper_ct2", {"model_dir": str(path)}, "Faster-Whisper / CTranslate2"
+        return "whisper_ct2", {"model_dir": str(path)}, "Faster-Whisper فارسی (زبان fa)"
 
     encoder = _first_existing(path, ["encoder.onnx", "encoder.int8.onnx"])
     decoder = _first_existing(path, ["decoder.onnx", "decoder.int8.onnx"])

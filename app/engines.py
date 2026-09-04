@@ -70,6 +70,37 @@ def _cuda_available() -> bool:
         return False
 
 
+PERSIAN_WHISPER_PROMPT = "گفتگو به زبان فارسی. سلام، خوبی، ممنون، بله، نه."
+
+
+def persian_whisper_options() -> dict:
+    """Decode settings that keep Whisper on Persian and avoid a slow beam search."""
+    return {
+        "language": "fa",
+        "task": "transcribe",
+        "beam_size": 1,
+        "best_of": 1,
+        "patience": 1.0,
+        "temperature": 0.0,
+        "vad_filter": False,
+        "without_timestamps": True,
+        "word_timestamps": False,
+        "condition_on_previous_text": False,
+        "initial_prompt": PERSIAN_WHISPER_PROMPT,
+        "multilingual": False,
+        "suppress_blank": True,
+    }
+
+
+def mostly_latin_script(text: str) -> bool:
+    """True when the transcript looks like English/Latin instead of Persian."""
+    letters = [char for char in text if char.isalpha()]
+    if len(letters) < 4:
+        return False
+    latin = sum(1 for char in letters if ("A" <= char <= "Z") or ("a" <= char <= "z"))
+    return (latin / len(letters)) >= 0.55
+
+
 class VoskEngine(Engine):
     supports_stream = True
 
@@ -77,8 +108,8 @@ class VoskEngine(Engine):
         super().__init__(info)
         try:
             from vosk import KaldiRecognizer, Model, SetLogLevel
-        except ImportError as exc:
-            raise TranscriptionError("بسته vosk نصب نیست. pip install vosk") from exc
+        except ImportError as extra:
+            raise TranscriptionError("بسته vosk نصب نیست. pip install vosk") from extra
 
         SetLogLevel(-1)
         model_dir = info.files.get("model_dir") or info.path
@@ -133,34 +164,56 @@ class WhisperCT2Engine(Engine):
         super().__init__(info)
         try:
             from faster_whisper import WhisperModel
-        except ImportError as exc:
-            raise TranscriptionError("بسته faster-whisper نصب نیست. pip install faster-whisper") from exc
+        except ImportError as extra:
+            raise TranscriptionError("بسته faster-whisper نصب نیست. pip install faster-whisper") from extra
 
         model_dir = info.files.get("model_dir") or info.path
         use_cuda = _cuda_available()
         device = "cuda" if use_cuda else "cpu"
         compute_type = "float16" if use_cuda else "int8"
-        cpu_threads = max(1, min(8, os.cpu_count() or 4))
+        cpu_threads = max(4, os.cpu_count() or 4)
         self._model = WhisperModel(
             model_dir,
             device=device,
             compute_type=compute_type,
             cpu_threads=cpu_threads,
+            num_workers=1,
         )
+        try:
+            english_only = not bool(self._model.model.is_multilingual)
+        except Exception:
+            english_only = False
+        if english_only:
+            raise TranscriptionError(
+                "این مدل ویسپر به‌صورت English-only بارگذاری شد، بنابراین فارسی را به انگلیسی تبدیل می‌کند. "
+                "فایل‌های tokenizer.json و vocabulary.json باید داخل پوشه whisper-persian-v4-ct2 باشند."
+            )
+
+    def _decode(self, samples: np.ndarray, extra: dict | None = None) -> str:
+        options = persian_whisper_options()
+        if extra:
+            options.update(extra)
+        try:
+            segments, _info = self._model.transcribe(samples, **options)
+        except TypeError:
+            options.pop("multilingual", None)
+            segments, _info = self._model.transcribe(samples, **options)
+        parts = [segment.text.strip() for segment in segments if getattr(segment, "text", None)]
+        return " ".join(parts).strip()
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = TARGET_RATE) -> str:
         samples = normalize_audio(audio, sample_rate)
         if samples.size == 0:
             return ""
-        segments, _info = self._model.transcribe(
-            samples,
-            language="fa",
-            beam_size=5,
-            vad_filter=True,
-            without_timestamps=True,
-        )
-        parts = [segment.text.strip() for segment in segments if segment.text]
-        return " ".join(parts).strip()
+        text = self._decode(samples)
+        if mostly_latin_script(text):
+            retry = self._decode(
+                samples,
+                {"initial_prompt": "متن فارسی: این یک رونویسی گفتار فارسی است."},
+            )
+            if retry and not mostly_latin_script(retry):
+                return retry
+        return text
 
     def close(self) -> None:
         self._model = None
