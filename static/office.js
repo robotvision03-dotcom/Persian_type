@@ -9,11 +9,8 @@ let liveTimer = null;
 let refreshing = false;
 let lastBuyers = [];
 let lastVehicles = [];
+let lastArchive = [];
 let pendingInspectId = null;
-let historyDay = "";
-let historyPage = 1;
-let historyPrev = "";
-let historyNext = "";
 let apptDay = "";
 let apptPrev = "";
 let apptNext = "";
@@ -75,56 +72,67 @@ function selectField(name, options, selected, extra = "") {
   return `<select name="${escapeHtml(name)}" ${extra}>${optionHtml(options, selected || "")}</select>`;
 }
 
-function paintWinnerBanner(rows, winners) {
-  const banner = $("winner-banner");
-  if (!banner) return;
-  const pending = winners || [];
-  const notes = (rows || []).filter((row) => row.unread && (row.event === "WINNER_READY" || row.event === "YOU_WON" || row.event === "WINNER_ACCEPTED"));
-  if (pending.length) {
-    banner.classList.remove("hidden");
-    banner.innerHTML = pending
-      .map(
-        (row) =>
-          `<strong>برنده مزایده مشخص شد</strong><br />${escapeHtml(row.brand || "")} ${escapeHtml(row.model || "")} · برنده ${escapeHtml(row.buyer_name || "#" + row.buyer_id)} · ${money(row.final_price)} تومان`
-      )
-      .join("<hr />");
-    return;
-  }
-  if (!notes.length) {
-    banner.classList.add("hidden");
-    banner.innerHTML = "";
-    return;
-  }
-  banner.classList.remove("hidden");
-  banner.innerHTML = notes
-    .map((row) => `<strong>${escapeHtml(row.title)}</strong><br />${escapeHtml(row.body || "")}`)
-    .join("<hr />");
+function specLine(label, value) {
+  if (value === null || value === undefined || value === "") return "";
+  return `<p><strong>${escapeHtml(label)}</strong><br />${escapeHtml(value)}</p>`;
 }
 
-function renderPendingWinners(winners) {
-  const box = $("pending-winners");
-  if (!box) return;
-  const rows = winners || [];
-  if (!rows.length) {
-    box.innerHTML = "";
-    return;
+function renderBuyerInspection(item) {
+  const report = item.inspection || {};
+  const categories = report.categories || [];
+  if (!categories.length && !item.inspection_summary) {
+    return `<p class="hint">کارشناسی ثبت شده است.</p>`;
   }
-  box.innerHTML = rows
-    .map(
-      (row) => `<article class="notice-win">
-        <strong>برنده مزایده #${row.auction_id}</strong>
-        <p>${escapeHtml(row.brand || "")} ${escapeHtml(row.model || "")} · ${escapeHtml(row.buyer_name || "خریدار #" + row.buyer_id)} · ${money(row.final_price)} تومان</p>
-        <div class="actions">
-          <button class="start accept" type="button" data-id="${row.auction_id}">پذیرش برنده</button>
-          <button class="ghost reject" type="button" data-id="${row.auction_id}">رد برنده</button>
-        </div>
-      </article>`
-    )
+  const strengths = (item.strengths || report.strengths || []).map((row) => `<li>${escapeHtml(row)}</li>`).join("");
+  const blocks = categories
+    .map((category) => {
+      const groups = (category.groups || [{ items: category.items || [] }])
+        .map((group) => {
+          const rows = (group.items || [])
+            .map((row) => {
+              const cls = row.ok ? "ok" : "issue";
+              return `<li>${escapeHtml(row.label)}: <span class="status-pill ${cls}">${escapeHtml(row.status)}</span></li>`;
+            })
+            .join("");
+          return `<div class="inspect-group"><h5>${escapeHtml(group.label || category.label)}</h5><ul>${rows}</ul></div>`;
+        })
+        .join("");
+      return `<details class="inspect-acc"><summary><strong>${escapeHtml(category.label)}</strong><span class="score">${escapeHtml(category.score)}</span></summary>
+        <p class="hint">${escapeHtml(category.summary || "")}</p>${groups}</details>`;
+    })
     .join("");
+  return `<div class="result-inspect">
+      <div class="spec-readout">
+        ${specLine("نوع بدنه", item.body_type)}
+        ${specLine("وضعیت رنگ", item.paint_status)}
+        ${specLine("وضعیت بدنه", item.body_condition)}
+        ${specLine("وضعیت اتاق", item.cabin_condition)}
+        ${specLine("وضعیت فنی", item.technical_condition)}
+        ${specLine("رنگ بدنه", item.color)}
+        ${specLine("گیربکس", item.transmission)}
+        ${specLine("سوخت", item.fuel_type)}
+        ${specLine("موتور", item.engine)}
+        ${specLine("نوع سند", item.document_type)}
+        ${item.insurance_months ? specLine("مانده بیمه", item.insurance_months + " ماه") : ""}
+      </div>
+      <p>${escapeHtml(item.inspection_summary || report.summary || "")}</p>
+      ${strengths ? `<p>نقاط قوت</p><ul>${strengths}</ul>` : ""}
+      ${blocks}
+    </div>`;
 }
 
-function renderNotes(rows, winners) {
-  paintWinnerBanner(rows, winners);
+function pipelineHtml(car, auction) {
+  const status = car.status || "";
+  let step = 0;
+  if (["CUSTOMER_ARRIVED", "INSPECTION_IN_PROGRESS", "INSPECTION_COMPLETED", "PENDING_OFFICE_APPROVAL", "READY_FOR_BIDDING", "BIDDING_ACTIVE", "BIDDING_ENDED", "AUCTION_SUSPENDED", "SOLD"].includes(status)) step = 1;
+  if (["INSPECTION_IN_PROGRESS", "INSPECTION_COMPLETED", "PENDING_OFFICE_APPROVAL", "READY_FOR_BIDDING", "BIDDING_ACTIVE", "BIDDING_ENDED", "AUCTION_SUSPENDED", "SOLD"].includes(status)) step = 2;
+  if (["READY_FOR_BIDDING", "BIDDING_ACTIVE", "BIDDING_ENDED", "AUCTION_SUSPENDED", "SOLD"].includes(status) || car.office_approved) step = 3;
+  if (["BIDDING_ACTIVE", "BIDDING_ENDED", "AUCTION_SUSPENDED", "SOLD"].includes(status) || (auction && auction.status === "ACTIVE")) step = 4;
+  if (status === "SOLD" || status === "BIDDING_ENDED") step = 5;
+  const labels = ["ورود", "کارشناسی", "تأیید", "مزایده", "پایان"];
+  return `<ol class="pipe">${labels
+    .map((label, index) => `<li class="${index < step ? "done" : index === step - 1 ? "now" : ""}">${escapeHtml(label)}</li>`)
+    .join("")}</ol>`;
 }
 
 function showPane(id) {
@@ -157,46 +165,6 @@ function openInspect(vehicleId) {
   box.classList.remove("hidden");
 }
 
-async function loadNotes(winners) {
-  if (winners) lastWinners = winners;
-  renderNotes(await api("/office/notifications"), lastWinners);
-}
-
-async function loadHistory(day, page) {
-  if (day) historyDay = day;
-  if (page) historyPage = page;
-  const query = new URLSearchParams({ day: historyDay || todayIso(), page: String(historyPage || 1) });
-  const data = await api("/office/history?" + query.toString());
-  historyDay = data.day;
-  historyPage = data.page;
-  historyPrev = data.prev_day;
-  historyNext = data.next_day;
-  $("hist-label").textContent = data.jalali;
-  $("hist-summary").textContent = `${data.total_appointments || 0} نوبت · ${data.total_auctions} مزایده · ${data.total_bids} پیشنهاد`;
-  if (!data.auctions.length) {
-    $("history").innerHTML = `<p class="empty">برای این روز مزایده‌ای نیست.</p>`;
-  } else {
-    $("history").innerHTML = data.auctions
-      .map((row) => {
-        const winner = row.winner
-          ? `<p class="winner-row">برنده ${escapeHtml(row.winner.buyer_name || "#" + row.winner.buyer_id)} · ${money(row.winner.final_price)} · ${escapeHtml(row.winner.status)}</p>`
-          : "<p>برنده‌ای ثبت نشده</p>";
-        return `<article class="card">
-          <h3>${escapeHtml(row.vehicle.brand || "خودرو")} ${escapeHtml(row.vehicle.model || "")} · مزایده #${row.id}</h3>
-          <p>وضعیت ${escapeHtml(row.status)} · ${row.bid_count} پیشنهاد · پایان ${escapeHtml(row.end_time || "")}</p>
-          ${winner}
-          <button class="ghost view-bids" type="button" data-id="${row.id}">فهرست پیشنهادها</button>
-          <div class="bid-box" data-bids="${row.id}"></div>
-        </article>`;
-      })
-      .join("");
-  }
-  $("hist-pages").innerHTML = data.pages > 1
-    ? `<button class="ghost hist-page" type="button" data-page="${Math.max(1, data.page - 1)}" ${data.page <= 1 ? "disabled" : ""}>صفحه قبل</button>
-       <span>صفحه ${data.page} از ${data.pages}</span>
-       <button class="ghost hist-page" type="button" data-page="${Math.min(data.pages, data.page + 1)}" ${data.page >= data.pages ? "disabled" : ""}>صفحه بعد</button>`
-    : "";
-}
 
 function optionList(values, selected) {
   return values
@@ -280,18 +248,23 @@ function activeAuction(car, auctions) {
 function renderArchive(rows) {
   const box = $("archive");
   if (!box) return;
-  if (!(rows || []).length) {
-    box.innerHTML = `<p class="empty">خودروی کارشناسی‌شده‌ای نیست.</p>`;
+  lastArchive = rows || [];
+  if (!lastArchive.length) {
+    box.innerHTML = `<p class="empty">نتیجه‌ای ثبت نشده است.</p>`;
     return;
   }
-  box.innerHTML = `<table class="appts"><thead><tr><th>خودرو</th><th>مالک</th><th>تلفن</th><th>کارشناسی</th></tr></thead><tbody>${(rows || [])
+  box.innerHTML = `<table class="results-table"><thead><tr><th>خودرو</th><th>مالک</th><th>تلفن</th><th>کارشناسی</th><th>مزایده</th></tr></thead><tbody>${lastArchive
     .map(
       (row) => `<tr>
-        <td>#${row.id} ${escapeHtml(row.brand || "")} ${escapeHtml(row.model || "")} ${row.year || ""}</td>
+        <td>
+          <button class="name-link result-car" type="button" data-open="${row.id}">${escapeHtml(row.brand || "خودرو")} ${escapeHtml(row.model || "")} ${row.year || ""}</button>
+        </td>
         <td>${escapeHtml(row.customer_name || "—")}</td>
         <td dir="ltr">${escapeHtml(row.customer_phone || "—")}</td>
-        <td>${escapeHtml(row.list_label || row.status || "")}</td>
-      </tr>`
+        <td><span class="verdict ${row.verdict === "تعلیق شده" ? "paused" : "ok"}">${escapeHtml(row.verdict || row.list_label || "")}</span></td>
+        <td>${row.can_rebid ? `<button class="ghost publish" type="button" data-id="${row.id}">مزایده دوباره</button>` : escapeHtml(row.auction_status || "—")}</td>
+      </tr>
+      <tr class="result-detail hidden" data-result="${row.id}"><td colspan="5">${renderBuyerInspection(row)}</td></tr>`
     )
     .join("")}</tbody></table>`;
 }
@@ -442,7 +415,6 @@ async function refresh(options) {
   try {
   await loadCatalog();
   if (!apptDay) apptDay = todayIso();
-  if (!historyDay) historyDay = todayIso();
   const dash = await api("/office/dashboard?day=" + encodeURIComponent(apptDay));
   apptDay = dash.day || apptDay;
   apptPrev = dash.prev_day || "";
@@ -470,8 +442,6 @@ async function refresh(options) {
       if (cancelBtn && (!auction || auction.status !== "ACTIVE")) cancelBtn.remove();
     });
     lastWinners = dash.winners || [];
-    renderPendingWinners(lastWinners);
-    await loadNotes(lastWinners);
     lastBuyers = dash.buyers || [];
     renderArchive(dash.archive || []);
     $("buyers").innerHTML = `<table class="appts"><thead><tr><th>خریدار</th><th>وضعیت</th><th></th></tr></thead><tbody>${(dash.buyers || [])
@@ -490,13 +460,10 @@ async function refresh(options) {
   $("appts").innerHTML = `<table class="appts"><thead><tr><th>ساعت</th><th>وضعیت</th><th>مشتری</th><th></th></tr></thead><tbody>${(dash.appointments || [])
     .map((row) => {
       const off = row.off_hours ? `<span class="badge-off">خارج از وقت</span>` : "";
-      if (!row.id) {
-        return `<tr><td>${escapeHtml(row.date)} ${escapeHtml(row.time)} ${off}</td><td>نوبت تماس</td><td>${escapeHtml(row.customer_name || "")}</td>
-          <td><button class="ghost import-booking" type="button" data-id="${row.booking_appointment_id}">ثبت در دفتر</button></td></tr>`;
-      }
+      const cancelled = row.status === "CANCELLED";
       return `<tr><td>${escapeHtml(row.date)} ${escapeHtml(row.time)} ${off}</td><td>${escapeHtml(row.status)} ${row.source === "OFF_HOURS" || row.source === "WALK_IN" ? "· فوری" : ""}</td><td>${escapeHtml(row.customer_name || "")}<br /><small>${escapeHtml(row.customer_phone || "")}</small></td>
         <td class="appt-actions">
-          <button class="ghost arrive" type="button" data-id="${row.id}">ورود مشتری</button>
+          ${cancelled ? "" : `<button class="ghost arrive" type="button" data-id="${row.id}" data-vehicle="${row.vehicle_id || ""}">ورود مشتری</button>`}
           <button class="ghost edit-appt" type="button" data-id="${row.id}" data-date="${escapeHtml(row.date)}" data-time="${escapeHtml(row.time)}" data-name="${escapeHtml(row.customer_name || "")}" data-phone="${escapeHtml(row.customer_phone || "")}">عوض کردن</button>
           <button class="ghost cancel-appt" type="button" data-id="${row.id}">لغو نوبت</button>
           <button class="ghost delete-appt" type="button" data-id="${row.id}">حذف</button>
@@ -507,16 +474,19 @@ async function refresh(options) {
     .map((car) => {
       const auction = activeAuction(car, dash.auctions);
       const winner = (dash.winners || []).find((item) => auction && item.auction_id === auction.id);
+      const canRebid = car.inspection_completed && !(auction && auction.status === "ACTIVE");
       return `<article class="card" data-vehicle-id="${car.id}">
         <h3 class="live-status">#${car.id} ${escapeHtml(car.brand || "خودرو")} ${escapeHtml(car.model || "")} — ${escapeHtml(car.status)}</h3>
+        ${pipelineHtml(car, auction)}
         <p>مالک ${escapeHtml(car.customer_name || "—")} · ${escapeHtml(car.customer_phone || "—")}</p>
         <p class="live-flags">کارشناسی: ${car.inspection_completed ? "تمام" : "نه"} · تأیید: ${car.office_approved ? "بله" : "نه"} · انتشار: ${car.published_for_bidding ? "بله" : "نه"}</p>
         <p class="live-auction">${auction ? `مزایده ${escapeHtml(auction.status)} · فعلی ${money(auction.current_price)} · پایان ${escapeHtml(auction.end_time || "")}` : "مزایده‌ای فعال نیست"}</p>
-        ${winner ? `<p class="notice-win">برنده ${escapeHtml(winner.buyer_name || "خریدار #" + winner.buyer_id)} · ${money(winner.final_price)} تومان · ${escapeHtml(winner.status)}</p>` : ""}
+        ${winner ? `<p>برنده ${escapeHtml(winner.buyer_name || "خریدار #" + winner.buyer_id)} · ${money(winner.final_price)} تومان · ${escapeHtml(winner.status)}</p>` : ""}
         <div class="actions">
           <button class="ghost inspect" type="button" data-id="${car.id}">شروع کارشناسی</button>
           <button class="ghost approve" type="button" data-id="${car.id}">تأیید دفتر</button>
-          <button class="start publish" type="button" data-id="${car.id}">انتشار مزایده</button>
+          <button class="start publish" type="button" data-id="${car.id}">${canRebid && car.status !== "READY_FOR_BIDDING" && !car.published_for_bidding ? "مزایده دوباره" : "انتشار مزایده"}</button>
+          ${auction && auction.status === "ACTIVE" ? `<button class="ghost suspend-auc" type="button" data-id="${auction.id}">تعلیق مزایده</button>` : ""}
           ${auction && auction.status === "ACTIVE" ? `<button class="ghost cancel-auc" type="button" data-id="${auction.id}">لغو مزایده</button>` : ""}
           ${auction ? `<button class="ghost view-bids" type="button" data-id="${auction.id}">فهرست پیشنهادها</button>` : ""}
           ${winner ? `<button class="start accept" type="button" data-id="${auction.id}">پذیرش برنده</button><button class="ghost reject" type="button" data-id="${auction.id}">رد برنده</button>` : ""}
@@ -543,12 +513,7 @@ async function refresh(options) {
     )
     .join("")}</tbody></table>`;
   lastWinners = dash.winners || [];
-  renderPendingWinners(lastWinners);
   startLive();
-  await loadNotes(lastWinners);
-  if (!live) {
-    await loadHistory(historyDay, historyPage);
-  }
   } finally {
     refreshing = false;
   }
@@ -807,27 +772,10 @@ document.addEventListener("click", async (event) => {
     await bindPicker(name);
     return;
   }
-  if (event.target.closest("#hist-prev")) {
-    historyDay = historyPrev || historyDay;
-    historyPage = 1;
-    await loadHistory();
-    return;
-  }
-  if (event.target.closest("#hist-next")) {
-    historyDay = historyNext || historyDay;
-    historyPage = 1;
-    await loadHistory();
-    return;
-  }
-  if (event.target.closest("#hist-today")) {
-    historyDay = todayIso();
-    historyPage = 1;
-    await loadHistory();
-    return;
-  }
-  const histPage = event.target.closest(".hist-page");
-  if (histPage) {
-    await loadHistory(historyDay, Number(histPage.getAttribute("data-page") || 1));
+  const resultCar = event.target.closest(".result-car");
+  if (resultCar) {
+    const box = document.querySelector(`[data-result="${resultCar.getAttribute("data-open")}"]`);
+    if (box) box.classList.toggle("hidden");
     return;
   }
   if (event.target.closest("#appt-prev") && apptPrev) {
@@ -853,17 +801,6 @@ document.addEventListener("click", async (event) => {
   const bidPage = event.target.closest(".bid-page");
   if (bidPage) {
     await loadBids(bidPage.getAttribute("data-id"), bidPage.getAttribute("data-page"));
-    return;
-  }
-  const noteRead = event.target.closest(".note-read");
-  if (noteRead) {
-    await api("/notifications/read", { method: "POST", body: JSON.stringify({ ids: [Number(noteRead.getAttribute("data-note"))] }) });
-    await loadNotes();
-    return;
-  }
-  if (event.target.closest("#notes-read")) {
-    await api("/notifications/read", { method: "POST", body: JSON.stringify({ ids: [] }) });
-    await loadNotes();
     return;
   }
   const jump = event.target.closest(".body-chip");
@@ -895,7 +832,7 @@ document.addEventListener("click", async (event) => {
         method: "POST",
         body: JSON.stringify({ report: collectReport(form), summary: form.querySelector('input[name="summary"]').value, finalize: true }),
       });
-      showPane("archive");
+      showPane("cars");
       refresh();
     } catch (error) {
       alert(error.message);
@@ -906,7 +843,6 @@ document.addEventListener("click", async (event) => {
   if (!btn || btn.classList.contains("finalize-report")) return;
   const id = btn.getAttribute("data-id");
   try {
-    if (btn.classList.contains("import-booking")) await api(`/office/appointments/import-booking/${id}`, { method: "POST" });
     if (btn.classList.contains("edit-appt")) {
       const form = $("appt-form");
       form.appointment_id.value = id;
@@ -928,14 +864,25 @@ document.addEventListener("click", async (event) => {
       if (!confirm("این نوبت حذف شود؟")) return;
       await api(`/office/appointments/${id}`, { method: "DELETE" });
     }
-    if (btn.classList.contains("arrive")) await api(`/office/appointments/${id}/status`, { method: "POST", body: JSON.stringify({ status: "ARRIVED" }) });
+    if (btn.classList.contains("arrive")) {
+      await api(`/office/appointments/${id}/status`, { method: "POST", body: JSON.stringify({ status: "ARRIVED" }) });
+      pendingInspectId = btn.getAttribute("data-vehicle") || "";
+      showPane("cars");
+    }
     if (btn.classList.contains("inspect")) {
       await api(`/office/vehicles/${id}/inspect`, { method: "POST" });
       pendingInspectId = id;
       showPane("cars");
     }
     if (btn.classList.contains("approve")) await api(`/office/vehicles/${id}/approve`, { method: "POST" });
-    if (btn.classList.contains("publish")) await api(`/office/vehicles/${id}/publish`, { method: "POST", body: JSON.stringify({}) });
+    if (btn.classList.contains("publish")) {
+      await api(`/office/vehicles/${id}/publish`, { method: "POST", body: JSON.stringify({}) });
+      showPane("cars");
+    }
+    if (btn.classList.contains("suspend-auc")) {
+      await api(`/office/auctions/${id}/suspend`, { method: "POST" });
+      showPane("archive");
+    }
     if (btn.classList.contains("cancel-auc")) await api(`/office/auctions/${id}/cancel`, { method: "POST" });
     if (btn.classList.contains("accept")) await api(`/office/auctions/${id}/accept-winner`, { method: "POST" });
     if (btn.classList.contains("reject")) await api(`/office/auctions/${id}/reject-winner`, { method: "POST" });

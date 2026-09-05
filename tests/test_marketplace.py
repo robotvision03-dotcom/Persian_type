@@ -696,6 +696,8 @@ class ArchiveAndPersistenceTests(unittest.TestCase):
             self.assertEqual(len(archive), 1)
             self.assertEqual(archive[0]["customer_name"], "علی رضایی")
             self.assertEqual(archive[0]["customer_phone"], "09120000000")
+            self.assertEqual(archive[0]["verdict"], "کارشناسی تأیید")
+            self.assertTrue(archive[0]["can_rebid"])
             self.assertNotIn("vin", archive[0])
             dash = svc.office_dashboard(path, now=when)
             self.assertEqual(dash["archive"][0]["customer_phone"], "09120000000")
@@ -767,6 +769,79 @@ class ArchiveAndPersistenceTests(unittest.TestCase):
                     os.environ.pop("PERSIAN_TYPE_DATA", None)
                 else:
                     os.environ["PERSIAN_TYPE_DATA"] = previous_data
+
+
+class OfficePipelineTests(unittest.TestCase):
+    def test_booking_appointment_is_imported_without_desk_step(self):
+        from app import booking
+
+        tmp, path = _db()
+        with tmp:
+            booking_id = booking.book_appointment(
+                "سارا احمدی",
+                "کوییک",
+                "آر",
+                12000,
+                "2026-09-12",
+                "10:30",
+                db_path=path,
+                phone="09121112233",
+            )
+            rows = svc.office_appointments(path, day="2026-09-12")
+            self.assertTrue(rows)
+            self.assertTrue(all(row.get("id") for row in rows))
+            match = next(row for row in rows if row.get("booking_appointment_id") == booking_id)
+            self.assertTrue(match["vehicle_id"])
+            self.assertEqual(match["customer_name"], "سارا احمدی")
+            self.assertEqual(match["customer_phone"], "09121112233")
+            arrived = svc.set_appointment_status(match["id"], "ARRIVED", db_path=path)
+            self.assertEqual(arrived["vehicle_id"], match["vehicle_id"])
+            vehicle = svc.get_vehicle(match["vehicle_id"], path)
+            self.assertEqual(vehicle["status"], "CUSTOMER_ARRIVED")
+
+    def test_suspend_then_reauction_inspected_car(self):
+        tmp, path = _db()
+        with tmp:
+            when = datetime(2026, 9, 5, 9, 0, 0)
+            _appt, vehicle, auction = _pipeline(path, now=when)
+            _, buyer = _buyer(path, "rebid@ex.com")
+            paused = svc.suspend_auction(auction["id"], db_path=path, now=when)
+            self.assertEqual(paused["status"], "SUSPENDED")
+            car = svc.get_vehicle(vehicle["id"], path)
+            self.assertEqual(car["status"], "AUCTION_SUSPENDED")
+            self.assertEqual(car["published_for_bidding"], 0)
+            self.assertIsNone(svc.auction_for_vehicle(vehicle["id"], path))
+            self.assertEqual(svc.buyer_visible_auctions(buyer, path, now=when), [])
+            archive = svc.list_inspected_vehicles(path)
+            row = next(item for item in archive if item["id"] == vehicle["id"])
+            self.assertEqual(row["verdict"], "تعلیق شده")
+            self.assertTrue(row["can_rebid"])
+            self.assertTrue(row.get("inspection"))
+            again = svc.publish_vehicle(vehicle["id"], duration_seconds=3600, increment=5_000_000, db_path=path, now=when + timedelta(minutes=1))
+            self.assertEqual(again["status"], "ACTIVE")
+            self.assertNotEqual(again["id"], auction["id"])
+            visible = svc.buyer_visible_auctions(buyer, path, now=when + timedelta(minutes=1))
+            self.assertEqual(len(visible), 1)
+            self.assertEqual(visible[0]["auction"]["id"], again["id"])
+            dash = svc.office_dashboard(path, now=when + timedelta(minutes=1))
+            self.assertTrue(any(item["id"] == vehicle["id"] for item in dash["vehicles"]))
+            self.assertEqual(svc.get_vehicle(vehicle["id"], path)["status"], "BIDDING_ACTIVE")
+
+    def test_publish_requires_only_finished_inspection(self):
+        tmp, path = _db()
+        with tmp:
+            when = datetime(2026, 9, 5, 9, 0, 0)
+            appt = svc.create_appointment("2026-09-05", "10:30", "علی رضایی", "09120000000", db_path=path, now=when)
+            vehicle = next(item for item in svc.list_vehicles(path) if item["appointment_id"] == appt["id"])
+            with self.assertRaises(svc.MarketplaceError):
+                svc.publish_vehicle(vehicle["id"], db_path=path, now=when)
+            svc.start_inspection(vehicle["id"], db_path=path, now=when)
+            svc.finalize_inspection(vehicle["id"], "سالم", db_path=path, now=when)
+            svc.update_vehicle(vehicle["id"], {"brand": "پژو", "model": "207", "starting_price": 1_300_000_000}, db_path=path, now=when)
+            auction = svc.publish_vehicle(vehicle["id"], db_path=path, now=when)
+            self.assertEqual(auction["status"], "ACTIVE")
+            with self.assertRaises(svc.MarketplaceError):
+                svc.publish_vehicle(vehicle["id"], db_path=path, now=when)
 
 
 if __name__ == "__main__":

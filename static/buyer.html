@@ -6,8 +6,8 @@
     <title>پورتال خریدار</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=29" />
-    <link rel="stylesheet" href="/static/portal.css?v=29" />
+    <link rel="stylesheet" href="/static/styles.css?v=33" />
+    <link rel="stylesheet" href="/static/portal.css?v=33" />
   </head>
   <body class="portal-page">
     <div class="backdrop"></div>
@@ -103,8 +103,28 @@
       <form id="bid-form" class="vehicle-form sheet-box">
         <h4 id="bid-title">ثبت پیشنهاد</h4>
         <p id="bid-meta" class="hint"></p>
-        <label class="spec-field"><span>مبلغ پیشنهاد</span><input id="bid-amount" class="bid-amount" type="number" min="1" /></label>
-        <label class="spec-field"><span>سقف خودکار</span><input id="auto-amount" class="auto-amount" type="number" min="1" /></label>
+        <label class="spec-field money-field"><span>مبلغ پیشنهاد</span>
+          <input id="bid-amount" class="bid-amount money-input" inputmode="numeric" dir="ltr" autocomplete="off" />
+          <p class="money-words" id="bid-words"></p>
+          <div class="money-chips" data-for="bid-amount">
+            <button type="button" data-add="10000000">+۱۰ میلیون</button>
+            <button type="button" data-add="50000000">+۵۰ میلیون</button>
+            <button type="button" data-add="100000000">+۱۰۰ میلیون</button>
+            <button type="button" data-add="500000000">+۵۰۰ میلیون</button>
+            <button type="button" data-add="1000000000">+۱ میلیارد</button>
+          </div>
+        </label>
+        <label class="spec-field money-field"><span>سقف خودکار</span>
+          <input id="auto-amount" class="auto-amount money-input" inputmode="numeric" dir="ltr" autocomplete="off" />
+          <p class="money-words" id="auto-words"></p>
+          <div class="money-chips" data-for="auto-amount">
+            <button type="button" data-add="10000000">+۱۰ میلیون</button>
+            <button type="button" data-add="50000000">+۵۰ میلیون</button>
+            <button type="button" data-add="100000000">+۱۰۰ میلیون</button>
+            <button type="button" data-add="500000000">+۵۰۰ میلیون</button>
+            <button type="button" data-add="1000000000">+۱ میلیارد</button>
+          </div>
+        </label>
         <div class="actions">
           <button class="start" id="bid-submit" type="button">ثبت پیشنهاد</button>
           <button class="ghost" id="auto-submit" type="button">پیشنهاد خودکار</button>
@@ -113,6 +133,6 @@
         <p id="bid-msg" class="hint"></p>
       </form>
     </div>
-    <script src="/static/buyer.js?v=29"></script>
+    <script src="/static/buyer.js?v=33"></script>
   </body>
 </html>

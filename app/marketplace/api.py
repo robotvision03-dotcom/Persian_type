@@ -555,6 +555,15 @@ def office_pause(auction_id: int, request: Request, authorization: str | None = 
     return svc.set_auction_status(auction_id, "SCHEDULED", db(request))
 
 
+@router.post("/office/auctions/{auction_id}/suspend")
+def office_suspend(auction_id: int, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    staff_user(request, authorization)
+    try:
+        return svc.suspend_auction(auction_id, db(request))
+    except svc.MarketplaceError as extra:
+        raise wrap(extra) from extra
+
+
 @router.post("/office/auctions/{auction_id}/cancel")
 def office_cancel(auction_id: int, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     user = staff_user(request, authorization)

@@ -36,6 +36,43 @@ function money(value) {
   return Number(value || 0).toLocaleString("fa-IR");
 }
 
+function parseMoney(value) {
+  return Number(String(value ?? "").replace(/[^\d]/g, "") || 0);
+}
+
+function groupMoney(value) {
+  const digits = String(value ?? "").replace(/[^\d]/g, "");
+  if (!digits) return "";
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, "/");
+}
+
+function moneyWords(value) {
+  const amount = Number(value || 0);
+  if (!amount) return "";
+  if (amount >= 1_000_000_000) {
+    const n = amount / 1_000_000_000;
+    return `${n.toLocaleString("fa-IR", { maximumFractionDigits: 2 })} میلیارد تومان`;
+  }
+  if (amount >= 1_000_000) {
+    const n = amount / 1_000_000;
+    return `${n.toLocaleString("fa-IR", { maximumFractionDigits: 1 })} میلیون تومان`;
+  }
+  return `${money(amount)} تومان`;
+}
+
+function bindMoneyField(id, wordsId) {
+  const field = $(id);
+  const words = $(wordsId);
+  if (!field) return;
+  const paint = () => {
+    const raw = parseMoney(field.value);
+    field.value = groupMoney(raw || "");
+    if (words) words.textContent = raw ? moneyWords(raw) : "";
+  };
+  field.addEventListener("input", paint);
+  field.addEventListener("blur", paint);
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -199,8 +236,11 @@ function openBid(auctionId) {
   const auction = item.auction || {};
   bidAuctionId = String(auction.id);
   $("bid-title").textContent = `پیشنهاد · ${item.brand || ""} ${item.model || ""}`.trim();
-  $("bid-meta").textContent = `فعلی ${money(auction.current_price)} · حداقل بعدی ${money(auction.minimum_next_bid)}`;
-  $("bid-amount").value = auction.minimum_next_bid || "";
+  $("bid-meta").textContent = `فعلی ${groupMoney(auction.current_price)} · حداقل بعدی ${groupMoney(auction.minimum_next_bid)}`;
+  $("bid-amount").value = groupMoney(auction.minimum_next_bid || "");
+  $("auto-amount").value = "";
+  if ($("bid-words")) $("bid-words").textContent = moneyWords(auction.minimum_next_bid || 0);
+  if ($("auto-words")) $("auto-words").textContent = "";
   if ($("bid-msg")) $("bid-msg").textContent = "";
   openSheet("bid-sheet");
 }
@@ -382,11 +422,11 @@ async function submitBid(kind) {
   const msg = $("bid-msg");
   try {
     if (kind === "auto") {
-      const maxBid = $("auto-amount").value;
-      await api(`/auctions/${bidAuctionId}/auto-bid`, { method: "POST", body: JSON.stringify({ max_bid: Number(maxBid) }) });
+      const maxBid = parseMoney($("auto-amount").value);
+      await api(`/auctions/${bidAuctionId}/auto-bid`, { method: "POST", body: JSON.stringify({ max_bid: maxBid }) });
     } else {
-      const amount = $("bid-amount").value;
-      await api(`/auctions/${bidAuctionId}/bids`, { method: "POST", body: JSON.stringify({ amount: Number(amount) }) });
+      const amount = parseMoney($("bid-amount").value);
+      await api(`/auctions/${bidAuctionId}/bids`, { method: "POST", body: JSON.stringify({ amount }) });
     }
     closeSheets();
     refresh();
@@ -415,6 +455,15 @@ document.addEventListener("click", async (event) => {
       if (!reg.password.value) reg.password.value = login.password.value;
     }
     openSheet("register-sheet");
+    return;
+  }
+  const chip = event.target.closest(".money-chips button[data-add]");
+  if (chip) {
+    const field = document.getElementById(chip.parentElement.getAttribute("data-for"));
+    if (field) {
+      field.value = groupMoney(parseMoney(field.value) + Number(chip.getAttribute("data-add") || 0));
+      field.dispatchEvent(new Event("input"));
+    }
     return;
   }
   if (event.target.closest(".open-bid")) {
@@ -472,4 +521,6 @@ document.addEventListener("click", async (event) => {
   }
 });
 
+bindMoneyField("bid-amount", "bid-words");
+bindMoneyField("auto-amount", "auto-words");
 refresh();

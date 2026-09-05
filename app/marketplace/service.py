@@ -513,9 +513,11 @@ def is_off_hours_slot(day: str, time: str) -> bool:
     return not ("09:00" <= hhmm < "17:00")
 
 
-def _appointment_payload(row: dict[str, Any]) -> dict[str, Any]:
+def _appointment_payload(row: dict[str, Any], vehicle_id: int | None = None) -> dict[str, Any]:
     extra = dict(row)
     extra["off_hours"] = is_off_hours_slot(str(extra.get("date") or ""), str(extra.get("time") or ""))
+    if vehicle_id is not None:
+        extra["vehicle_id"] = vehicle_id
     return extra
 
 
@@ -598,9 +600,10 @@ def create_appointment(
 def get_appointment(appointment_id: int, db_path: Path | None = None) -> dict[str, Any]:
     with get_conn(db_path) as conn:
         row = conn.execute("SELECT * FROM marketplace_appointments WHERE id = ?", (appointment_id,)).fetchone()
-    if row is None:
-        raise MarketplaceError("نوبت پیدا نشد.", 404)
-    return _appointment_payload(dict(row))
+        if row is None:
+            raise MarketplaceError("نوبت پیدا نشد.", 404)
+        vehicle = conn.execute("SELECT id FROM vehicles WHERE appointment_id = ?", (appointment_id,)).fetchone()
+    return _appointment_payload(dict(row), vehicle_id=int(vehicle["id"]) if vehicle else None)
 
 
 def update_appointment(appointment_id: int, fields: dict[str, Any], db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
@@ -660,7 +663,7 @@ def import_booking_appointment(booking_id: int, db_path: Path | None = None, now
             (booking_id,),
         ).fetchone()
     if existing:
-        return _appointment_payload(dict(existing))
+        return get_appointment(int(existing["id"]), db_path)
     booking = next((item for item in list_appointments(db_path) if int(item.get("id") or 0) == int(booking_id)), None)
     if booking is None:
         raise MarketplaceError("نوبت تماس پیدا نشد.", 404)
@@ -688,13 +691,25 @@ def set_appointment_status(appointment_id: int, status: str, db_path: Path | Non
     }
     appt_status, vehicle_status = mapping.get(status, (status, None))
     auction_ids: list[int] = []
+    locked = {
+        "INSPECTION_IN_PROGRESS",
+        "INSPECTION_COMPLETED",
+        "PENDING_OFFICE_APPROVAL",
+        "READY_FOR_BIDDING",
+        "BIDDING_ACTIVE",
+        "BIDDING_ENDED",
+        "AUCTION_SUSPENDED",
+        "SOLD",
+    }
     with get_conn(db_path) as conn:
         conn.execute("UPDATE marketplace_appointments SET status = ? WHERE id = ?", (appt_status, appointment_id))
         if vehicle_status and appt_status != "CANCELLED":
-            conn.execute(
-                "UPDATE vehicles SET status = ?, updated_at = ? WHERE appointment_id = ?",
-                (vehicle_status, now_iso(now), appointment_id),
-            )
+            current = conn.execute("SELECT status FROM vehicles WHERE appointment_id = ?", (appointment_id,)).fetchone()
+            if current is None or current["status"] not in locked:
+                conn.execute(
+                    "UPDATE vehicles SET status = ?, updated_at = ? WHERE appointment_id = ?",
+                    (vehicle_status, now_iso(now), appointment_id),
+                )
         if appt_status == "CANCELLED":
             rows = conn.execute(
                 """
@@ -723,6 +738,21 @@ def set_appointment_status(appointment_id: int, status: str, db_path: Path | Non
 def office_appointments(db_path: Path | None = None, day: date | str | None = None) -> list[dict[str, Any]]:
     day_s = parse_day(str(day) if day else None).isoformat() if day else None
     with get_conn(db_path) as conn:
+        imported = {
+            row["booking_appointment_id"]
+            for row in conn.execute(
+                "SELECT booking_appointment_id FROM marketplace_appointments WHERE booking_appointment_id IS NOT NULL"
+            ).fetchall()
+        }
+    for item in list_appointments(db_path):
+        booking_id = item.get("id")
+        if not booking_id or booking_id in imported:
+            continue
+        try:
+            import_booking_appointment(int(booking_id), db_path)
+        except MarketplaceError:
+            continue
+    with get_conn(db_path) as conn:
         if day_s:
             rows = conn.execute(
                 "SELECT * FROM marketplace_appointments WHERE date = ? ORDER BY time, id",
@@ -730,27 +760,12 @@ def office_appointments(db_path: Path | None = None, day: date | str | None = No
             ).fetchall()
         else:
             rows = conn.execute("SELECT * FROM marketplace_appointments ORDER BY date, time").fetchall()
-    out = [_appointment_payload(dict(row)) for row in rows]
-    imported = {row.get("booking_appointment_id") for row in out if row.get("booking_appointment_id")}
-    for item in list_appointments(db_path):
-        if item.get("id") in imported:
-            continue
-        out.append(
-            {
-                "id": None,
-                "booking_appointment_id": item.get("id"),
-                "customer_name": item.get("customer_name"),
-                "customer_phone": item.get("phone") or "",
-                "date": item.get("date"),
-                "time": item.get("time"),
-                "status": "SCHEDULED",
-                "source": "BOOKING",
-                "off_hours": is_off_hours_slot(str(item.get("date") or ""), str(item.get("time") or "")),
-                "brand": item.get("car_name") or "",
-                "model": item.get("car_model") or "",
-            }
-        )
-    out.sort(key=lambda row: (str(row.get("date") or ""), str(row.get("time") or "")))
+        vehicles = {
+            row["appointment_id"]: int(row["id"])
+            for row in conn.execute("SELECT id, appointment_id FROM vehicles").fetchall()
+            if row["appointment_id"] is not None
+        }
+    out = [_appointment_payload(dict(row), vehicles.get(row["id"])) for row in rows]
     if day_s:
         out = [row for row in out if str(row.get("date") or "")[:10] == day_s]
     return out
@@ -869,30 +884,68 @@ def _sync_owner(conn: Any, vehicle_id: int) -> None:
 
 
 def list_inspected_vehicles(db_path: Path | None = None) -> list[dict[str, Any]]:
+    latest_auctions: dict[int, dict[str, Any]] = {}
+    with get_conn(db_path) as conn:
+        for row in conn.execute(
+            """
+            SELECT * FROM auctions WHERE id IN (
+                SELECT MAX(id) FROM auctions GROUP BY vehicle_id
+            )
+            """
+        ).fetchall():
+            latest_auctions[int(row["vehicle_id"])] = dict(row)
     cars = []
     for car in list_vehicles(db_path, pipeline_only=False):
         inspection = car.get("inspection") or {}
         status = str(car.get("status") or "")
+        auction = latest_auctions.get(int(car["id"])) or {}
         registered = bool(
             car.get("inspection_completed")
             or inspection.get("id")
             or status.startswith("INSPECTION")
+            or status == "AUCTION_SUSPENDED"
         )
         if not registered:
             continue
         finished = bool(car.get("inspection_completed") or inspection.get("status") == "COMPLETED")
+        if status == "AUCTION_SUSPENDED" or auction.get("status") == "SUSPENDED":
+            verdict = "تعلیق شده"
+        elif finished and (car.get("office_approved") or status in {"READY_FOR_BIDDING", "BIDDING_ACTIVE", "BIDDING_ENDED", "SOLD"}):
+            verdict = "کارشناسی تأیید"
+        elif finished:
+            verdict = "کارشناسی تأیید"
+        else:
+            verdict = "در حال کارشناسی"
+        report = inspection.get("public_report") or public_report(inspection.get("report"))
         cars.append(
             {
                 "id": car["id"],
                 "brand": car.get("brand") or "",
                 "model": car.get("model") or "",
                 "year": car.get("year"),
+                "mileage": car.get("mileage"),
+                "transmission": car.get("transmission") or "",
+                "color": car.get("color") or "",
+                "body_type": car.get("body_type") or "",
+                "body_condition": car.get("body_condition") or "",
+                "paint_status": car.get("paint_status") or "",
+                "cabin_condition": car.get("cabin_condition") or "",
+                "technical_condition": car.get("technical_condition") or "",
+                "fuel_type": car.get("fuel_type") or "",
+                "engine": car.get("engine") or "",
+                "document_type": car.get("document_type") or "",
+                "insurance_months": car.get("insurance_months"),
+                "strengths": car.get("strengths") if isinstance(car.get("strengths"), list) else [],
                 "customer_name": car.get("customer_name") or "",
                 "customer_phone": car.get("customer_phone") or "",
                 "status": status,
                 "finished": finished,
-                "list_label": "ثبت شد" if finished else "در حال کارشناسی",
-                "inspection_summary": car.get("inspection_summary") or "",
+                "verdict": verdict,
+                "list_label": verdict,
+                "can_rebid": bool(finished and status != "BIDDING_ACTIVE"),
+                "auction_status": auction.get("status") or "",
+                "inspection_summary": car.get("inspection_summary") or (report or {}).get("summary") or "",
+                "inspection": report,
                 "updated_at": car.get("updated_at") or "",
             }
         )
@@ -1100,8 +1153,15 @@ def publish_vehicle(
     now: datetime | str | None = None,
 ) -> dict[str, Any]:
     vehicle = get_vehicle(vehicle_id, db_path)
-    if not vehicle["inspection_completed"] or not vehicle["office_approved"]:
-        raise MarketplaceError("خودرو باید کارشناسی شده و تأیید دفتر باشد.", 409)
+    if not vehicle["inspection_completed"]:
+        raise MarketplaceError("اول کارشناسی باید تمام شود.", 409)
+    with get_conn(db_path) as conn:
+        active = conn.execute(
+            "SELECT id FROM auctions WHERE vehicle_id = ? AND status = 'ACTIVE'",
+            (vehicle_id,),
+        ).fetchone()
+    if active:
+        raise MarketplaceError("مزایده فعال برای این خودرو برقرار است.", 409)
     stamp = parse_dt(now)
     start = stamp
     end = stamp + timedelta(seconds=int(duration_seconds))
@@ -1186,7 +1246,7 @@ def auction_for_vehicle(vehicle_id: int, db_path: Path | None = None) -> dict[st
         row = conn.execute(
             """
             SELECT * FROM auctions
-            WHERE vehicle_id = ? AND status != 'CANCELLED'
+            WHERE vehicle_id = ? AND status NOT IN ('CANCELLED', 'SUSPENDED')
             ORDER BY id DESC LIMIT 1
             """,
             (vehicle_id,),
@@ -1648,6 +1708,28 @@ def buyer_auction_history(buyer_id: int, db_path: Path | None = None) -> dict[st
         "winning": [dict(row) for row in won],
         "lost": [row["id"] for row in lost],
     }
+
+
+def suspend_auction(auction_id: int, db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
+    created = now_iso(now)
+    auction = get_auction(auction_id, db_path)
+    if auction["status"] != "ACTIVE":
+        raise MarketplaceError("فقط مزایده فعال را می‌توان تعلیق کرد.", 409)
+    with get_conn(db_path) as conn:
+        conn.execute("UPDATE auctions SET status = 'SUSPENDED', updated_at = ? WHERE id = ?", (created, auction_id))
+        conn.execute(
+            "UPDATE auto_bid_limits SET status = 'CANCELLED', updated_at = ? WHERE auction_id = ? AND status = 'ACTIVE'",
+            (created, auction_id),
+        )
+        conn.execute(
+            """
+            UPDATE vehicles SET status = 'AUCTION_SUSPENDED', published_for_bidding = 0, updated_at = ?
+            WHERE id = ?
+            """,
+            (created, auction["vehicle_id"]),
+        )
+        bump_live(conn)
+    return get_auction(auction_id, db_path)
 
 
 def cancel_auction(auction_id: int, db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
