@@ -6,6 +6,15 @@ function showPane(id) {
   document.querySelectorAll("[data-tab]").forEach((el) => el.classList.toggle("on", el.getAttribute("data-tab") === id));
 }
 
+function closeSheets() {
+  ["profile-sheet", "register-sheet", "bid-sheet"].forEach((id) => $(id) && $(id).classList.add("hidden"));
+}
+
+function openSheet(id) {
+  closeSheets();
+  if ($(id)) $(id).classList.remove("hidden");
+}
+
 function token() {
   return localStorage.getItem(tokenKey) || "";
 }
@@ -85,6 +94,8 @@ function renderInspection(item) {
     </details>`;
 }
 
+let lastAuctions = [];
+let bidAuctionId = "";
 let liveRevision = 0;
 let liveTimer = null;
 let refreshing = false;
@@ -182,26 +193,16 @@ async function loadBids(auctionId, page) {
     </div>`;
 }
 
-function snapshotBids() {
-  const out = {};
-  document.querySelectorAll(".bid-amount").forEach((el) => {
-    out[el.getAttribute("data-id")] = { bid: el.value, auto: "" };
-  });
-  document.querySelectorAll(".auto-amount").forEach((el) => {
-    const id = el.getAttribute("data-auto");
-    out[id] = out[id] || { bid: "", auto: "" };
-    out[id].auto = el.value;
-  });
-  return out;
-}
-
-function restoreBids(saved) {
-  Object.entries(saved || {}).forEach(([id, values]) => {
-    const bid = document.querySelector(`.bid-amount[data-id="${id}"]`);
-    const auto = document.querySelector(`.auto-amount[data-auto="${id}"]`);
-    if (bid && values.bid) bid.value = values.bid;
-    if (auto && values.auto) auto.value = values.auto;
-  });
+function openBid(auctionId) {
+  const item = lastAuctions.find((row) => String((row.auction || {}).id) === String(auctionId));
+  if (!item) return;
+  const auction = item.auction || {};
+  bidAuctionId = String(auction.id);
+  $("bid-title").textContent = `پیشنهاد · ${item.brand || ""} ${item.model || ""}`.trim();
+  $("bid-meta").textContent = `فعلی ${money(auction.current_price)} · حداقل بعدی ${money(auction.minimum_next_bid)}`;
+  $("bid-amount").value = auction.minimum_next_bid || "";
+  if ($("bid-msg")) $("bid-msg").textContent = "";
+  openSheet("bid-sheet");
 }
 
 function startLive() {
@@ -231,7 +232,6 @@ async function refresh(options) {
   }
   if (refreshing) return;
   refreshing = true;
-  const saved = snapshotBids();
   try {
     const me = await api("/buyers/me");
     $("auth-box").classList.add("hidden");
@@ -256,6 +256,7 @@ async function refresh(options) {
       profileForm.address.value = buyer.address || "";
     }
     const auctions = await api("/auctions");
+    lastAuctions = auctions;
     const box = $("auctions");
     if (!auctions.length) {
       box.className = "empty";
@@ -268,21 +269,13 @@ async function refresh(options) {
           return `<article class="card"><h3>${item.brand} ${item.model}</h3>
             <p>سال ${item.year || "—"} · ${item.mileage ? item.mileage + " کیلومتر" : ""} · ${item.transmission || ""} · ${item.color || ""}</p>
             ${renderInspection(item)}
-            <p>پیشنهاد فعلی: ${money(auction.current_price)}</p>
-            <p>حداقل افزایش: ${money(auction.bid_increment)} (۰٫۵٪)</p>
-            <p class="next-bid-row">حداقل بعدی: ${money(auction.minimum_next_bid)}
-              <button type="button" class="ghost use-min-btn" data-id="${auction.id}" data-amount="${auction.minimum_next_bid || 0}">پیشنهاد این مبلغ</button>
-            </p>
+            <p>پیشنهاد فعلی: ${money(auction.current_price)} · حداقل بعدی ${money(auction.minimum_next_bid)}</p>
             <p>پایان: ${auction.end_time || ""}</p>
             <div class="actions">
-              <input data-id="${auction.id}" class="bid-amount" type="number" placeholder="پیشنهاد فرد" />
-              <button class="start bid-btn" data-id="${auction.id}">ثبت پیشنهاد</button>
-              <input data-auto="${auction.id}" class="auto-amount" type="number" placeholder="سقف خودکار" />
-              <button class="ghost auto-btn" data-id="${auction.id}">پیشنهاد خودکار</button>
+              <button class="start open-bid" type="button" data-id="${auction.id}">ثبت پیشنهاد</button>
             </div></article>`;
         })
         .join("");
-      restoreBids(saved);
     }
     const appts = await api("/buyer/appointments");
     $("appts").className = appts.length ? "" : "empty";
@@ -322,14 +315,10 @@ $("login-form").addEventListener("submit", async (event) => {
   }
 });
 
-$("register-btn").addEventListener("click", async () => {
-  const extra = $("register-extra");
-  if (extra && extra.classList.contains("hidden")) {
-    extra.classList.remove("hidden");
-    $("auth-msg").textContent = "نام، کد ملی و تلفن را وارد کنید، بعد دوباره ثبت‌نام را بزنید.";
-    return;
-  }
-  const form = new FormData($("login-form"));
+$("register-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const msg = $("register-msg");
   try {
     await api("/auth/register", {
       method: "POST",
@@ -342,10 +331,17 @@ $("register-btn").addEventListener("click", async () => {
         business_name: form.get("business_name") || "",
       }),
     });
+    if (msg) msg.textContent = "ثبت شد. دفتر باید حساب را فعال کند؛ بعد ورود کنید.";
     $("auth-msg").textContent = "ثبت شد. دفتر باید حساب را فعال کند؛ بعد ورود کنید.";
+    closeSheets();
   } catch (error) {
-    $("auth-msg").textContent = error.message;
+    if (msg) msg.textContent = error.message;
   }
+});
+
+$("bid-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await submitBid("manual");
 });
 
 $("profile-form").addEventListener("submit", async (event) => {
@@ -366,7 +362,7 @@ $("profile-form").addEventListener("submit", async (event) => {
       }),
     });
     if (msg) msg.textContent = "پروفایل ذخیره شد.";
-    $("profile-sheet") && $("profile-sheet").classList.add("hidden");
+    closeSheets();
     refresh();
   } catch (error) {
     if (msg) msg.textContent = error.message;
@@ -381,19 +377,65 @@ $("logout-btn").addEventListener("click", async () => {
   refresh();
 });
 
+async function submitBid(kind) {
+  if (!bidAuctionId) return;
+  const msg = $("bid-msg");
+  try {
+    if (kind === "auto") {
+      const maxBid = $("auto-amount").value;
+      await api(`/auctions/${bidAuctionId}/auto-bid`, { method: "POST", body: JSON.stringify({ max_bid: Number(maxBid) }) });
+    } else {
+      const amount = $("bid-amount").value;
+      await api(`/auctions/${bidAuctionId}/bids`, { method: "POST", body: JSON.stringify({ amount: Number(amount) }) });
+    }
+    closeSheets();
+    refresh();
+  } catch (error) {
+    if (msg) msg.textContent = error.message;
+    else alert(error.message);
+  }
+}
+
 document.addEventListener("click", async (event) => {
   const tab = event.target.closest("[data-tab]");
   if (tab) {
-    $("profile-sheet") && $("profile-sheet").classList.add("hidden");
+    closeSheets();
     showPane(tab.getAttribute("data-tab"));
     return;
   }
   if (event.target.closest("#open-profile")) {
-    $("profile-sheet").classList.remove("hidden");
+    openSheet("profile-sheet");
     return;
   }
-  if (event.target.closest("#close-profile") || event.target.id === "profile-sheet") {
-    $("profile-sheet").classList.add("hidden");
+  if (event.target.closest("#open-register")) {
+    const login = $("login-form");
+    const reg = $("register-form");
+    if (login && reg) {
+      if (!reg.email.value) reg.email.value = login.email.value;
+      if (!reg.password.value) reg.password.value = login.password.value;
+    }
+    openSheet("register-sheet");
+    return;
+  }
+  if (event.target.closest(".open-bid")) {
+    openBid(event.target.closest(".open-bid").getAttribute("data-id"));
+    return;
+  }
+  if (event.target.closest("#bid-submit")) {
+    await submitBid("manual");
+    return;
+  }
+  if (event.target.closest("#auto-submit")) {
+    await submitBid("auto");
+    return;
+  }
+  if (
+    event.target.closest("#close-profile") ||
+    event.target.closest("#close-register") ||
+    event.target.closest("#close-bid") ||
+    event.target.classList.contains("sheet")
+  ) {
+    closeSheets();
     return;
   }
   if (event.target.closest("#hist-prev")) {
@@ -427,36 +469,6 @@ document.addEventListener("click", async (event) => {
   const bidPage = event.target.closest(".bid-page");
   if (bidPage) {
     await loadBids(bidPage.getAttribute("data-id"), bidPage.getAttribute("data-page"));
-    return;
-  }
-  const useMin = event.target.closest(".use-min-btn");
-  if (useMin) {
-    const id = useMin.getAttribute("data-id");
-    const amount = useMin.getAttribute("data-amount") || "";
-    const field = document.querySelector(`.bid-amount[data-id="${id}"]`);
-    if (field) {
-      field.value = amount;
-      field.focus();
-    }
-    return;
-  }
-  const bid = event.target.closest(".bid-btn");
-  const auto = event.target.closest(".auto-btn");
-  try {
-    if (bid) {
-      const id = bid.getAttribute("data-id");
-      const amount = document.querySelector(`.bid-amount[data-id="${id}"]`).value;
-      await api(`/auctions/${id}/bids`, { method: "POST", body: JSON.stringify({ amount: Number(amount) }) });
-      refresh();
-    }
-    if (auto) {
-      const id = auto.getAttribute("data-id");
-      const maxBid = document.querySelector(`.auto-amount[data-auto="${id}"]`).value;
-      await api(`/auctions/${id}/auto-bid`, { method: "POST", body: JSON.stringify({ max_bid: Number(maxBid) }) });
-      refresh();
-    }
-  } catch (error) {
-    alert(error.message);
   }
 });
 

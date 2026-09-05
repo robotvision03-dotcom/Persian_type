@@ -6,8 +6,8 @@
     <title>پورتال خریدار</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/static/styles.css?v=28" />
-    <link rel="stylesheet" href="/static/portal.css?v=28" />
+    <link rel="stylesheet" href="/static/styles.css?v=29" />
+    <link rel="stylesheet" href="/static/portal.css?v=29" />
   </head>
   <body class="portal-page">
     <div class="backdrop"></div>
@@ -27,15 +27,9 @@
         <form id="login-form" class="stack">
           <input name="email" type="email" placeholder="ایمیل" required autocomplete="username" />
           <input name="password" type="password" placeholder="رمز عبور" required autocomplete="current-password" />
-          <div id="register-extra" class="hidden">
-            <input name="full_name" type="text" placeholder="نام و نام خانوادگی" autocomplete="name" />
-            <input name="national_id" type="text" inputmode="numeric" placeholder="کد ملی / شماره شناسایی" />
-            <input name="phone" type="tel" placeholder="شماره تلفن" autocomplete="tel" />
-            <input name="business_name" type="text" placeholder="نام کسب‌وکار (اختیاری)" />
-          </div>
           <div class="actions">
             <button class="start" type="submit">ورود</button>
-            <button class="ghost" id="register-btn" type="button">ثبت‌نام</button>
+            <button class="ghost" id="open-register" type="button">ثبت‌نام</button>
           </div>
           <p id="auth-msg" class="hint"></p>
         </form>
@@ -69,26 +63,56 @@
             <button class="ghost" id="open-profile" type="button">ویرایش پروفایل</button>
           </div>
           <p id="appts" class="empty">نوبتی نیست.</p>
-          <div id="profile-sheet" class="sheet hidden">
-          <form id="profile-form" class="vehicle-form sheet-box">
-            <h4>ویرایش پروفایل</h4>
-            <label class="spec-field"><span>نام خریدار</span><input name="contact_person" required /></label>
-            <label class="spec-field"><span>کد ملی</span><input name="national_id" inputmode="numeric" /></label>
-            <label class="spec-field"><span>تلفن</span><input name="phone" type="tel" /></label>
-            <label class="spec-field"><span>ایمیل</span><input name="email" type="email" /></label>
-            <label class="spec-field"><span>کسب‌وکار</span><input name="business_name" /></label>
-            <label class="spec-field"><span>شهر</span><input name="city" /></label>
-            <label class="spec-field wide"><span>نشانی</span><input name="address" /></label>
-            <div class="actions">
-              <button class="start" type="submit">ذخیره پروفایل</button>
-              <button class="ghost" id="close-profile" type="button">بستن</button>
-            </div>
-            <p id="profile-msg" class="hint"></p>
-          </form>
-          </div>
         </section>
       </div>
     </main>
-    <script src="/static/buyer.js?v=28"></script>
+    <div id="register-sheet" class="sheet hidden">
+      <form id="register-form" class="vehicle-form sheet-box">
+        <h4>ثبت‌نام خریدار</h4>
+        <input name="email" type="email" placeholder="ایمیل" required autocomplete="username" />
+        <input name="password" type="password" placeholder="رمز عبور" required autocomplete="new-password" />
+        <input name="full_name" type="text" placeholder="نام و نام خانوادگی" required autocomplete="name" />
+        <input name="national_id" type="text" inputmode="numeric" placeholder="کد ملی / شماره شناسایی" required />
+        <input name="phone" type="tel" placeholder="شماره تلفن" required autocomplete="tel" />
+        <input name="business_name" type="text" placeholder="نام کسب‌وکار (اختیاری)" />
+        <div class="actions">
+          <button class="start" type="submit">ثبت‌نام</button>
+          <button class="ghost" id="close-register" type="button">بستن</button>
+        </div>
+        <p id="register-msg" class="hint"></p>
+      </form>
+    </div>
+    <div id="profile-sheet" class="sheet hidden">
+      <form id="profile-form" class="vehicle-form sheet-box">
+        <h4>ویرایش پروفایل</h4>
+        <label class="spec-field"><span>نام خریدار</span><input name="contact_person" required /></label>
+        <label class="spec-field"><span>کد ملی</span><input name="national_id" inputmode="numeric" /></label>
+        <label class="spec-field"><span>تلفن</span><input name="phone" type="tel" /></label>
+        <label class="spec-field"><span>ایمیل</span><input name="email" type="email" /></label>
+        <label class="spec-field"><span>کسب‌وکار</span><input name="business_name" /></label>
+        <label class="spec-field"><span>شهر</span><input name="city" /></label>
+        <label class="spec-field wide"><span>نشانی</span><input name="address" /></label>
+        <div class="actions">
+          <button class="start" type="submit">ذخیره پروفایل</button>
+          <button class="ghost" id="close-profile" type="button">بستن</button>
+        </div>
+        <p id="profile-msg" class="hint"></p>
+      </form>
+    </div>
+    <div id="bid-sheet" class="sheet hidden">
+      <form id="bid-form" class="vehicle-form sheet-box">
+        <h4 id="bid-title">ثبت پیشنهاد</h4>
+        <p id="bid-meta" class="hint"></p>
+        <label class="spec-field"><span>مبلغ پیشنهاد</span><input id="bid-amount" class="bid-amount" type="number" min="1" /></label>
+        <label class="spec-field"><span>سقف خودکار</span><input id="auto-amount" class="auto-amount" type="number" min="1" /></label>
+        <div class="actions">
+          <button class="start" id="bid-submit" type="button">ثبت پیشنهاد</button>
+          <button class="ghost" id="auto-submit" type="button">پیشنهاد خودکار</button>
+          <button class="ghost" id="close-bid" type="button">بستن</button>
+        </div>
+        <p id="bid-msg" class="hint"></p>
+      </form>
+    </div>
+    <script src="/static/buyer.js?v=29"></script>
   </body>
 </html>
