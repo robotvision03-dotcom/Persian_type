@@ -284,13 +284,13 @@ function renderArchive(rows) {
     box.innerHTML = `<p class="empty">خودروی کارشناسی‌شده‌ای نیست.</p>`;
     return;
   }
-  box.innerHTML = `<table class="appts"><thead><tr><th>خودرو</th><th>مالک</th><th>تلفن</th><th>وضعیت</th></tr></thead><tbody>${(rows || [])
+  box.innerHTML = `<table class="appts"><thead><tr><th>خودرو</th><th>مالک</th><th>تلفن</th><th>کارشناسی</th></tr></thead><tbody>${(rows || [])
     .map(
       (row) => `<tr>
         <td>#${row.id} ${escapeHtml(row.brand || "")} ${escapeHtml(row.model || "")} ${row.year || ""}</td>
         <td>${escapeHtml(row.customer_name || "—")}</td>
         <td dir="ltr">${escapeHtml(row.customer_phone || "—")}</td>
-        <td>${escapeHtml(row.status || "")}</td>
+        <td>${escapeHtml(row.list_label || row.status || "")}</td>
       </tr>`
     )
     .join("")}</tbody></table>`;
@@ -895,6 +895,7 @@ document.addEventListener("click", async (event) => {
         method: "POST",
         body: JSON.stringify({ report: collectReport(form), summary: form.querySelector('input[name="summary"]').value, finalize: true }),
       });
+      showPane("archive");
       refresh();
     } catch (error) {
       alert(error.message);

@@ -847,11 +847,40 @@ def list_vehicles(db_path: Path | None = None, pipeline_only: bool = False) -> l
     return [_hydrate_vehicle(row, inspections.get(row["id"])) for row in rows]
 
 
+def _sync_owner(conn: Any, vehicle_id: int) -> None:
+    row = conn.execute(
+        """
+        SELECT v.customer_name, v.customer_phone,
+               a.customer_name AS appt_name, a.customer_phone AS appt_phone
+        FROM vehicles v
+        LEFT JOIN marketplace_appointments a ON a.id = v.appointment_id
+        WHERE v.id = ?
+        """,
+        (vehicle_id,),
+    ).fetchone()
+    if row is None:
+        return
+    name = (row["customer_name"] or row["appt_name"] or "").strip()
+    phone = (row["customer_phone"] or row["appt_phone"] or "").strip()
+    conn.execute(
+        "UPDATE vehicles SET customer_name = ?, customer_phone = ? WHERE id = ?",
+        (name, phone, vehicle_id),
+    )
+
+
 def list_inspected_vehicles(db_path: Path | None = None) -> list[dict[str, Any]]:
     cars = []
     for car in list_vehicles(db_path, pipeline_only=False):
-        if not car.get("inspection_completed"):
+        inspection = car.get("inspection") or {}
+        status = str(car.get("status") or "")
+        registered = bool(
+            car.get("inspection_completed")
+            or inspection.get("id")
+            or status.startswith("INSPECTION")
+        )
+        if not registered:
             continue
+        finished = bool(car.get("inspection_completed") or inspection.get("status") == "COMPLETED")
         cars.append(
             {
                 "id": car["id"],
@@ -860,7 +889,9 @@ def list_inspected_vehicles(db_path: Path | None = None) -> list[dict[str, Any]]
                 "year": car.get("year"),
                 "customer_name": car.get("customer_name") or "",
                 "customer_phone": car.get("customer_phone") or "",
-                "status": car.get("status") or "",
+                "status": status,
+                "finished": finished,
+                "list_label": "ثبت شد" if finished else "در حال کارشناسی",
                 "inspection_summary": car.get("inspection_summary") or "",
                 "updated_at": car.get("updated_at") or "",
             }
@@ -938,6 +969,8 @@ def start_inspection(vehicle_id: int, db_path: Path | None = None, now: datetime
             "UPDATE marketplace_appointments SET status = 'INSPECTION_IN_PROGRESS' WHERE id = (SELECT appointment_id FROM vehicles WHERE id = ?)",
             (vehicle_id,),
         )
+        _sync_owner(conn, vehicle_id)
+        bump_live(conn)
     return get_vehicle(vehicle_id, db_path)
 
 
@@ -1031,6 +1064,8 @@ def finalize_inspection(
             "UPDATE marketplace_appointments SET status = 'INSPECTION_COMPLETED' WHERE id = (SELECT appointment_id FROM vehicles WHERE id = ?)",
             (vehicle_id,),
         )
+        _sync_owner(conn, vehicle_id)
+        bump_live(conn)
     return get_vehicle(vehicle_id, db_path)
 
 
