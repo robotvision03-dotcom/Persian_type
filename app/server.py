@@ -220,7 +220,9 @@ def reset_state(models_dir: str | Path | None = None, db_path: Path | None = Non
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    from .booking import default_db_path
+
+    return {"status": "ok", "data_file": str(default_db_path())}
 
 
 @app.get("/api/state")

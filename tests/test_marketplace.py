@@ -726,6 +726,41 @@ class ArchiveAndPersistenceTests(unittest.TestCase):
                 else:
                     os.environ["PERSIAN_TYPE_DATA"] = previous_data
 
+    def test_adopts_repo_records_when_durable_db_is_empty(self):
+        import app.booking as booking
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo_data = root / "data"
+            durable = root / "appdata"
+            repo_data.mkdir()
+            repo_db = repo_data / "bookings.sqlite"
+            empty = durable / "bookings.sqlite"
+            svc.bootstrap(repo_db)
+            svc.create_appointment("2026-09-05", "10:30", "مریم", "09125550000", db_path=repo_db)
+            svc.bootstrap(empty)
+            self.assertGreater(booking.sqlite_record_count(repo_db), booking.sqlite_record_count(empty))
+            previous = booking.DATA_DIR
+            previous_db = os.environ.pop("PERSIAN_TYPE_DB", None)
+            previous_data = os.environ.pop("PERSIAN_TYPE_DATA", None)
+            try:
+                booking.DATA_DIR = repo_data
+                os.environ["PERSIAN_TYPE_DATA"] = str(durable)
+                path = booking.default_db_path()
+                self.assertEqual(path, empty)
+                self.assertGreaterEqual(booking.sqlite_record_count(path), booking.sqlite_record_count(repo_db))
+                self.assertTrue((durable / "backups").exists())
+            finally:
+                booking.DATA_DIR = previous
+                if previous_db is None:
+                    os.environ.pop("PERSIAN_TYPE_DB", None)
+                else:
+                    os.environ["PERSIAN_TYPE_DB"] = previous_db
+                if previous_data is None:
+                    os.environ.pop("PERSIAN_TYPE_DATA", None)
+                else:
+                    os.environ["PERSIAN_TYPE_DATA"] = previous_data
+
 
 if __name__ == "__main__":
     unittest.main()
