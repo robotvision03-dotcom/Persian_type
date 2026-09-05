@@ -399,17 +399,17 @@ class CancelAndLiveTests(unittest.TestCase):
         tmp, path = _db()
         with tmp:
             when = datetime(2026, 9, 5, 9, 0, 0)
-            start = svc.live_state(path)["revision"]
+            start = svc.live_state(path, now=when)["revision"]
             _appt, _vehicle, auction = _pipeline(path, now=when, increment=100)
-            after_publish = svc.live_state(path)["revision"]
+            after_publish = svc.live_state(path, now=when)["revision"]
             self.assertGreater(after_publish, start)
             _, buyer = _buyer(path, "live2@ex.com")
-            after_register = svc.live_state(path)["revision"]
+            after_register = svc.live_state(path, now=when)["revision"]
             self.assertGreater(after_register, after_publish)
             svc.place_manual_bid(auction["id"], buyer, 1_300_000_000, db_path=path, now=when)
-            self.assertGreater(svc.live_state(path)["revision"], after_register)
+            self.assertGreater(svc.live_state(path, now=when)["revision"], after_register)
             svc.cancel_auction(auction["id"], db_path=path, now=when)
-            self.assertGreater(svc.live_state(path)["revision"], after_register)
+            self.assertGreater(svc.live_state(path, now=when)["revision"], after_register)
 
 
 class InspectionCatalogTests(unittest.TestCase):
@@ -470,7 +470,7 @@ class InspectionCatalogTests(unittest.TestCase):
             svc.approve_vehicle(vehicle["id"], db_path=path, now=when)
             self.assertEqual(svc.buyer_visible_auctions(buyer, path, now=when), [])
             auction = svc.publish_vehicle(vehicle["id"], increment=100, db_path=path, now=when)
-            self.assertEqual(auction["end_time"], (when + timedelta(seconds=60)).isoformat(timespec="seconds"))
+            self.assertEqual(auction["end_time"], (when + timedelta(seconds=svc.DEFAULT_DURATION_SECONDS)).isoformat(timespec="seconds"))
             visible = svc.buyer_visible_auctions(buyer, path, now=when)
             self.assertEqual(len(visible), 1)
             item = visible[0]

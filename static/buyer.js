@@ -36,6 +36,27 @@ function money(value) {
   return Number(value || 0).toLocaleString("fa-IR");
 }
 
+const STATUS_LABELS = {
+  ACTIVE: "فعال",
+  ENDED: "تمام شده",
+  CANCELLED: "لغو شده",
+  SUSPENDED: "تعلیق‌شده",
+  PENDING: "در انتظار",
+  PENDING_OFFICE_CONFIRMATION: "در انتظار تأیید دفتر",
+  ACCEPTED: "پذیرش شد",
+  REJECTED: "رد شد",
+  VERIFIED: "تأیید شده",
+  UNVERIFIED: "تأیید نشده",
+  MANUAL: "دستی",
+  AUTO: "خودکار",
+  SYSTEM: "سیستم",
+};
+
+function statusLabel(value) {
+  const key = String(value ?? "");
+  return STATUS_LABELS[key] || key;
+}
+
 function parseMoney(value) {
   return Number(String(value ?? "").replace(/[^\d]/g, "") || 0);
 }
@@ -195,12 +216,12 @@ async function loadHistory(day, page) {
         let winner = "نتیجه هنوز اعلام نشده";
         if (row.winner) {
           winner = row.winner.is_mine
-            ? `<span class="winner-row">شما برنده شدید · ${money(row.winner.final_price)} · ${escapeHtml(row.winner.status)}</span>`
+            ? `<span class="winner-row">شما برنده شدید · ${money(row.winner.final_price)} · ${escapeHtml(statusLabel(row.winner.status))}</span>`
             : `مزایده تمام شد · مبلغ نهایی ${money(row.winner.final_price)}`;
         }
         return `<article class="card">
           <h3>${escapeHtml(row.vehicle.brand || "خودرو")} ${escapeHtml(row.vehicle.model || "")} · مزایده #${row.id}</h3>
-          <p>وضعیت ${escapeHtml(row.status)} · ${row.bid_count} پیشنهاد · پایان ${escapeHtml(row.end_time || "")}</p>
+          <p>وضعیت ${escapeHtml(statusLabel(row.status))} · ${row.bid_count} پیشنهاد · پایان ${escapeHtml(row.end_time || "")}</p>
           <p>${winner}</p>
           <button class="ghost view-bids" type="button" data-id="${row.id}">فهرست پیشنهادهای این مزایده</button>
           <div class="bid-box" data-bids="${row.id}"></div>
@@ -220,7 +241,7 @@ async function loadBids(auctionId, page) {
   if (!box) return;
   const data = await api(`/auctions/${auctionId}/bids?page=${page || 1}&page_size=20`);
   const rows = (data.items || [])
-    .map((row) => `<tr><td>${row.is_mine ? "پیشنهاد شما" : "خریدار دیگر"}</td><td>${money(row.amount)}</td><td>${escapeHtml(row.bid_type)}</td><td>${escapeHtml(row.created_at)}</td></tr>`)
+    .map((row) => `<tr><td>${row.is_mine ? "پیشنهاد شما" : "خریدار دیگر"}</td><td>${money(row.amount)}</td><td>${escapeHtml(statusLabel(row.bid_type))}</td><td>${escapeHtml(row.created_at)}</td></tr>`)
     .join("");
   box.innerHTML = `<table class="history-table"><thead><tr><th>چه کسی</th><th>مبلغ</th><th>نوع</th><th>زمان</th></tr></thead><tbody>${rows || `<tr><td colspan="4">پیشنهادی نیست</td></tr>`}</tbody></table>
     <div class="day-nav">
@@ -279,7 +300,7 @@ async function refresh(options) {
     const buyer = me.buyer || {};
     const buyerName = buyer.contact_person || buyer.business_name || me.user.email;
     $("who").textContent = buyerName;
-    $("account-line").textContent = `${buyerName} وارد شده است — وضعیت ${buyer.status || ""} / تأیید ${buyer.verification_status || ""}`;
+    $("account-line").textContent = `${buyerName} وارد شده است — وضعیت ${statusLabel(buyer.status) || ""} / تأیید ${statusLabel(buyer.verification_status) || ""}`;
     if ($("profile-summary")) {
       $("profile-summary").textContent = [buyer.contact_person || buyer.business_name, buyer.phone, buyer.national_id ? "کد " + buyer.national_id : ""]
         .filter(Boolean)

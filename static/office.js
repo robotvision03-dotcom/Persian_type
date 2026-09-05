@@ -43,6 +43,42 @@ function money(value) {
   return Number(value || 0).toLocaleString("fa-IR");
 }
 
+const STATUS_LABELS = {
+  APPOINTMENT_SCHEDULED: "نوبت ثبت شد",
+  SCHEDULED: "ثبت‌شده",
+  BOOKED: "رزرو شده",
+  ARRIVED: "وارد شد",
+  CUSTOMER_ARRIVED: "ورود مشتری",
+  INSPECTION_IN_PROGRESS: "در حال کارشناسی",
+  INSPECTION_COMPLETED: "کارشناسی تمام",
+  PENDING_OFFICE_APPROVAL: "در انتظار تأیید",
+  READY_FOR_BIDDING: "آماده مزایده",
+  BIDDING_ACTIVE: "مزایده فعال",
+  BIDDING_ENDED: "مزایده تمام",
+  AUCTION_SUSPENDED: "تعلیق مزایده",
+  SOLD: "فروخته شد",
+  CANCELLED: "لغو شده",
+  ACTIVE: "فعال",
+  ENDED: "تمام شده",
+  SUSPENDED: "تعلیق‌شده",
+  PENDING: "در انتظار",
+  PENDING_OFFICE_CONFIRMATION: "در انتظار تأیید دفتر",
+  ACCEPTED: "پذیرش شد",
+  REJECTED: "رد شد",
+  VERIFIED: "تأیید شده",
+  UNVERIFIED: "تأیید نشده",
+  MANUAL: "دستی",
+  AUTO: "خودکار",
+  SYSTEM: "سیستم",
+  OFF_HOURS: "خارج از وقت",
+  WALK_IN: "مراجعه حضوری",
+};
+
+function statusLabel(value) {
+  const key = String(value ?? "");
+  return STATUS_LABELS[key] || key;
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -231,7 +267,7 @@ async function loadBids(auctionId, page) {
   if (!box) return;
   const data = await api(`/auctions/${auctionId}/bids?page=${page || 1}&page_size=20`);
   const rows = (data.items || [])
-    .map((row) => `<tr><td>${escapeHtml(row.buyer_name || "خریدار")} (#${row.buyer_id || "—"})</td><td>${money(row.amount)}</td><td>${escapeHtml(row.bid_type)}</td><td>${escapeHtml(row.created_at)}</td></tr>`)
+    .map((row) => `<tr><td>${escapeHtml(row.buyer_name || "خریدار")} (#${row.buyer_id || "—"})</td><td>${money(row.amount)}</td><td>${escapeHtml(statusLabel(row.bid_type))}</td><td>${escapeHtml(row.created_at)}</td></tr>`)
     .join("");
   box.innerHTML = `<table class="history-table"><thead><tr><th>خریدار</th><th>مبلغ</th><th>نوع</th><th>زمان</th></tr></thead><tbody>${rows || `<tr><td colspan="4">پیشنهادی نیست</td></tr>`}</tbody></table>
     <div class="day-nav">
@@ -262,7 +298,7 @@ function renderArchive(rows) {
         <td>${escapeHtml(row.customer_name || "—")}</td>
         <td dir="ltr">${escapeHtml(row.customer_phone || "—")}</td>
         <td><span class="verdict ${row.verdict === "تعلیق شده" ? "paused" : "ok"}">${escapeHtml(row.verdict || row.list_label || "")}</span></td>
-        <td>${row.can_rebid ? `<button class="ghost publish" type="button" data-id="${row.id}">مزایده دوباره</button>` : escapeHtml(row.auction_status || "—")}</td>
+        <td>${row.can_rebid ? `<button class="ghost publish" type="button" data-id="${row.id}">مزایده دوباره</button>` : escapeHtml(statusLabel(row.auction_status) || "—")}</td>
       </tr>
       <tr class="result-detail hidden" data-result="${row.id}"><td colspan="5">${renderBuyerInspection(row)}</td></tr>`
     )
@@ -426,16 +462,16 @@ async function refresh(options) {
       if (!card) return;
       const auction = activeAuction(car, dash.auctions);
       const status = card.querySelector(".live-status");
-      if (status) status.textContent = `#${car.id} ${car.brand || "خودرو"} ${car.model || ""} — ${car.status}`;
+      if (status) status.textContent = `#${car.id} ${car.brand || "خودرو"} ${car.model || ""} — ${statusLabel(car.status)}`;
       const flags = card.querySelector(".live-flags");
       if (flags) flags.textContent = `کارشناسی: ${car.inspection_completed ? "تمام" : "نه"} · تأیید: ${car.office_approved ? "بله" : "نه"} · انتشار: ${car.published_for_bidding ? "بله" : "نه"}`;
       const auc = card.querySelector(".live-auction");
       const winner = (dash.winners || []).find((item) => auction && item.auction_id === auction.id);
       if (auc) {
         auc.textContent = winner
-          ? `برنده ${winner.buyer_name || "#" + winner.buyer_id} · ${money(winner.final_price)} تومان`
+          ? `برنده ${winner.buyer_name || "#" + winner.buyer_id} · ${money(winner.final_price)} تومان · ${statusLabel(winner.status)}`
           : auction
-            ? `مزایده ${auction.status} · فعلی ${money(auction.current_price)} · پایان ${auction.end_time || ""}`
+            ? `مزایده ${statusLabel(auction.status)} · فعلی ${money(auction.current_price)} · پایان ${auction.end_time || ""}`
             : "مزایده‌ای فعال نیست";
       }
       const cancelBtn = card.querySelector(".cancel-auc");
@@ -446,7 +482,7 @@ async function refresh(options) {
     renderArchive(dash.archive || []);
     $("buyers").innerHTML = `<table class="appts"><thead><tr><th>خریدار</th><th>وضعیت</th><th></th></tr></thead><tbody>${(dash.buyers || [])
       .map(
-        (row) => `<tr><td>${escapeHtml(row.contact_person || row.business_name || row.email)} · ${escapeHtml(row.phone || "—")} · کد ${escapeHtml(row.national_id || "—")} (#${row.id})</td><td>${escapeHtml(row.status)} / ${escapeHtml(row.verification_status)}</td>
+        (row) => `<tr><td>${escapeHtml(row.contact_person || row.business_name || row.email)} · ${escapeHtml(row.phone || "—")} · کد ${escapeHtml(row.national_id || "—")} (#${row.id})</td><td>${escapeHtml(statusLabel(row.status))} / ${escapeHtml(statusLabel(row.verification_status))}</td>
       <td><button class="start activate" data-id="${row.id}">فعال و تأیید</button>
       <button class="ghost edit-buyer" type="button" data-id="${row.id}">ویرایش</button>
       <button class="ghost suspend" data-id="${row.id}">تعلیق</button></td></tr>`
@@ -461,7 +497,7 @@ async function refresh(options) {
     .map((row) => {
       const off = row.off_hours ? `<span class="badge-off">خارج از وقت</span>` : "";
       const cancelled = row.status === "CANCELLED";
-      return `<tr><td>${escapeHtml(row.date)} ${escapeHtml(row.time)} ${off}</td><td>${escapeHtml(row.status)} ${row.source === "OFF_HOURS" || row.source === "WALK_IN" ? "· فوری" : ""}</td><td>${escapeHtml(row.customer_name || "")}<br /><small>${escapeHtml(row.customer_phone || "")}</small></td>
+      return `<tr><td>${escapeHtml(row.date)} ${escapeHtml(row.time)} ${off}</td><td>${escapeHtml(statusLabel(row.status))} ${row.source === "OFF_HOURS" || row.source === "WALK_IN" ? "· فوری" : ""}</td><td>${escapeHtml(row.customer_name || "")}<br /><small>${escapeHtml(row.customer_phone || "")}</small></td>
         <td class="appt-actions">
           ${cancelled ? "" : `<button class="ghost arrive" type="button" data-id="${row.id}" data-vehicle="${row.vehicle_id || ""}">ورود مشتری</button>`}
           <button class="ghost edit-appt" type="button" data-id="${row.id}" data-date="${escapeHtml(row.date)}" data-time="${escapeHtml(row.time)}" data-name="${escapeHtml(row.customer_name || "")}" data-phone="${escapeHtml(row.customer_phone || "")}">عوض کردن</button>
@@ -476,12 +512,12 @@ async function refresh(options) {
       const winner = (dash.winners || []).find((item) => auction && item.auction_id === auction.id);
       const canRebid = car.inspection_completed && !(auction && auction.status === "ACTIVE");
       return `<article class="card" data-vehicle-id="${car.id}">
-        <h3 class="live-status">#${car.id} ${escapeHtml(car.brand || "خودرو")} ${escapeHtml(car.model || "")} — ${escapeHtml(car.status)}</h3>
+        <h3 class="live-status">#${car.id} ${escapeHtml(car.brand || "خودرو")} ${escapeHtml(car.model || "")} — ${escapeHtml(statusLabel(car.status))}</h3>
         ${pipelineHtml(car, auction)}
         <p>مالک ${escapeHtml(car.customer_name || "—")} · ${escapeHtml(car.customer_phone || "—")}</p>
         <p class="live-flags">کارشناسی: ${car.inspection_completed ? "تمام" : "نه"} · تأیید: ${car.office_approved ? "بله" : "نه"} · انتشار: ${car.published_for_bidding ? "بله" : "نه"}</p>
-        <p class="live-auction">${auction ? `مزایده ${escapeHtml(auction.status)} · فعلی ${money(auction.current_price)} · پایان ${escapeHtml(auction.end_time || "")}` : "مزایده‌ای فعال نیست"}</p>
-        ${winner ? `<p>برنده ${escapeHtml(winner.buyer_name || "خریدار #" + winner.buyer_id)} · ${money(winner.final_price)} تومان · ${escapeHtml(winner.status)}</p>` : ""}
+        <p class="live-auction">${auction ? `مزایده ${escapeHtml(statusLabel(auction.status))} · فعلی ${money(auction.current_price)} · پایان ${escapeHtml(auction.end_time || "")}` : "مزایده‌ای فعال نیست"}</p>
+        ${winner ? `<p>برنده ${escapeHtml(winner.buyer_name || "خریدار #" + winner.buyer_id)} · ${money(winner.final_price)} تومان · ${escapeHtml(statusLabel(winner.status))}</p>` : ""}
         <div class="actions">
           <button class="ghost inspect" type="button" data-id="${car.id}">شروع کارشناسی</button>
           <button class="ghost approve" type="button" data-id="${car.id}">تأیید دفتر</button>
@@ -506,7 +542,7 @@ async function refresh(options) {
   renderArchive(dash.archive || []);
   $("buyers").innerHTML = `<table class="appts"><thead><tr><th>خریدار</th><th>وضعیت</th><th></th></tr></thead><tbody>${(dash.buyers || [])
     .map(
-      (row) => `<tr><td>${escapeHtml(row.contact_person || row.business_name || row.email)} · ${escapeHtml(row.phone || "—")} · کد ${escapeHtml(row.national_id || "—")} (#${row.id})</td><td>${escapeHtml(row.status)} / ${escapeHtml(row.verification_status)}</td>
+      (row) => `<tr><td>${escapeHtml(row.contact_person || row.business_name || row.email)} · ${escapeHtml(row.phone || "—")} · کد ${escapeHtml(row.national_id || "—")} (#${row.id})</td><td>${escapeHtml(statusLabel(row.status))} / ${escapeHtml(statusLabel(row.verification_status))}</td>
       <td><button class="start activate" data-id="${row.id}">فعال و تأیید</button>
       <button class="ghost edit-buyer" type="button" data-id="${row.id}">ویرایش</button>
       <button class="ghost suspend" data-id="${row.id}">تعلیق</button></td></tr>`
