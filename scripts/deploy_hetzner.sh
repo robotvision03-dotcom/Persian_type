@@ -33,16 +33,17 @@ echo "Checking SSH to ${USER_NAME}@${HOST}..."
 "${SSH[@]}" "${USER_NAME}@${HOST}" 'echo connected; hostname; whoami'
 
 echo "Installing packages and app on ${HOST}..."
-"${SSH[@]}" "${USER_NAME}@${HOST}" bash -s -- "$APP_DIR" "$REPO_URL" "$BRANCH" "$DOWNLOAD_ASR" <<'REMOTE'
+"${SSH[@]}" "${USER_NAME}@${HOST}" bash -s -- "$APP_DIR" "$REPO_URL" "$BRANCH" "$DOWNLOAD_ASR" "$HOST" <<'REMOTE'
 set -euo pipefail
 APP_DIR="$1"
 REPO_URL="$2"
 BRANCH="$3"
 DOWNLOAD_ASR="$4"
+PUBLIC_HOST="$5"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y python3 python3-venv python3-pip git nginx curl
+apt-get install -y python3 python3-venv python3-pip git nginx curl openssl
 
 mkdir -p "$APP_DIR"
 if [[ -d "$APP_DIR/.git" ]]; then
@@ -87,15 +88,29 @@ WantedBy=multi-user.target
 EOF
 
 cat >/etc/nginx/sites-available/persian-type <<EOF
+upstream persian_type_app {
+    server 127.0.0.1:8000;
+}
+
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
 
     client_max_body_size 32m;
+    ssl_certificate     /etc/nginx/ssl/persian-type.crt;
+    ssl_certificate_key /etc/nginx/ssl/persian-type.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
 
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://persian_type_app;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -108,6 +123,16 @@ server {
     }
 }
 EOF
+
+mkdir -p /etc/nginx/ssl
+if [[ ! -f /etc/nginx/ssl/persian-type.crt ]]; then
+  openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
+    -keyout /etc/nginx/ssl/persian-type.key \
+    -out /etc/nginx/ssl/persian-type.crt \
+    -subj "/CN=${PUBLIC_HOST}" \
+    -addext "subjectAltName=IP:${PUBLIC_HOST}"
+fi
+chmod 600 /etc/nginx/ssl/persian-type.key
 
 ln -sfn /etc/nginx/sites-available/persian-type /etc/nginx/sites-enabled/persian-type
 rm -f /etc/nginx/sites-enabled/default
@@ -125,16 +150,17 @@ echo
 if command -v ufw >/dev/null 2>&1; then
   ufw allow OpenSSH || true
   ufw allow 80/tcp || true
+  ufw allow 443/tcp || true
   ufw --force enable || true
 fi
 
 systemctl --no-pager --full status persian-type | sed -n '1,20p'
-curl -fsS http://127.0.0.1:8000/ | head -c 200 || true
+curl -fsSk "https://127.0.0.1/" | head -c 200 || true
 echo
 echo "Deployed $APP_DIR on branch $BRANCH"
 REMOTE
 
-echo "Public URL: http://${HOST}/"
-echo "Office: http://${HOST}/office"
-echo "Buyer:  http://${HOST}/buyer"
-echo "Voice:  open the site, wait for boot, then شروع تماس"
+echo "Public URL: https://${HOST}/"
+echo "Office: https://${HOST}/office"
+echo "Buyer:  https://${HOST}/buyer"
+echo "Voice:  open HTTPS, accept cert warning, then شروع تماس (Allow microphone)"

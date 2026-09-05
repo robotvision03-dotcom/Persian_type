@@ -410,10 +410,56 @@ function onAudioFrame(input) {
   }
 }
 
+function micErrorMessage(error) {
+  const name = error && error.name ? String(error.name) : "";
+  const raw = error && error.message ? String(error.message) : String(error || "");
+  if (!window.isSecureContext || location.protocol !== "https:") {
+    return (
+      "مرورگر فقط روی HTTPS میکروفون را روشن می‌کند. " +
+      `لطفاً https://${location.host} را باز کنید ` +
+      "(اول هشدار گواهی را بپذیرید، بعد اجازه میکروفون را بدهید)."
+    );
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return "این مرورگر دسترسی میکروفون ندارد. Chrome یا Edge را امتحان کنید.";
+  }
+  if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+    return "اجازه میکروفون داده نشد. در تنظیمات سایت مرورگر، میکروفون را Allow کنید و دوباره شروع تماس بزنید.";
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return "میکروفونی پیدا نشد. هدفون یا میکروفون را وصل کنید.";
+  }
+  if (name === "NotReadableError" || name === "TrackStartError") {
+    return "میکروفون در برنامه دیگری در حال استفاده است. آن را ببندید و دوباره تلاش کنید.";
+  }
+  return raw || "دسترسی به میکروفون ممکن نشد.";
+}
+
+async function requestMicrophone() {
+  if (!window.isSecureContext || location.protocol !== "https:") {
+    throw new Error(micErrorMessage({ name: "SecurityError" }));
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error(micErrorMessage({ name: "NotSupportedError" }));
+  }
+  statusLine.textContent = "درخواست دسترسی میکروفون...";
+  partialLine.textContent = "لطفاً در پنجره مرورگر، Allow / اجازه را بزنید";
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+  } catch (error) {
+    throw new Error(micErrorMessage(error));
+  }
+}
+
 async function startListening() {
-  mediaStream = await navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-  });
+  mediaStream = await requestMicrophone();
   audioContext = new AudioContext();
   if (audioContext.state === "suspended") await audioContext.resume();
   sourceNode = audioContext.createMediaStreamSource(mediaStream);
@@ -423,7 +469,7 @@ async function startListening() {
   socket.binaryType = "arraybuffer";
   await new Promise((resolve, reject) => {
     socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener("error", () => reject(new Error("اتصال زنده برقرار نشد")), { once: true });
+    socket.addEventListener("error", () => reject(new Error("اتصال زنده صوتی برقرار نشد")), { once: true });
   });
   socket.send(JSON.stringify({ type: "start", session_id: sessionId }));
   socket.addEventListener("message", (event) => {
@@ -500,9 +546,13 @@ async function startCall() {
     try {
       await startListening();
       partialLine.textContent = "گوش می‌دهم...";
-      statusLine.textContent = "گوش می‌دهم...";
+      statusLine.textContent = "میکروفون روشن است — گوش می‌دهم...";
     } catch (error) {
-      statusLine.textContent = error.message + " — می‌توانید تایپ کنید.";
+      const message = error.message || String(error);
+      statusLine.textContent = message;
+      partialLine.textContent = "";
+      alert(message);
+      // Keep the text call alive so the user can still type answers.
     }
   } else {
     statusLine.textContent = "گفتار آماده نیست؛ پاسخ را بنویسید.";
@@ -521,6 +571,15 @@ callBtn.addEventListener("click", () => {
 });
 
 async function boot() {
+  const banner = $("https-banner");
+  const httpsLink = $("https-link");
+  if (banner && location.protocol !== "https:") {
+    banner.classList.remove("hidden");
+    if (httpsLink) {
+      httpsLink.href = `https://${location.host}${location.pathname}${location.search}`;
+      httpsLink.textContent = `https://${location.host}`;
+    }
+  }
   setOverlay(true, "در حال آماده‌سازی دفتر...");
   try {
     const payload = await fetch("/api/boot", { method: "POST" }).then((r) => r.json());
