@@ -15,10 +15,13 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
-from .booking import DEFAULT_WHATSAPP, whatsapp_digits
+from .booking import DEFAULT_WHATSAPP, durable_file, whatsapp_digits
 
 SOFTWARE_WHATSAPP = DEFAULT_WHATSAPP
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "data" / "whatsapp.json"
+
+
+def config_path() -> Path:
+    return durable_file("whatsapp.json")
 
 
 def software_number() -> str:
@@ -28,10 +31,11 @@ def software_number() -> str:
 
 
 def load_config() -> dict[str, Any]:
-    if not CONFIG_PATH.is_file():
+    path = config_path()
+    if not path.is_file():
         return {}
     try:
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}

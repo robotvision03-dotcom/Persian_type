@@ -40,6 +40,8 @@ from .dialogue import DialogueManager
 from .discovery import ModelInfo, find_models_dir, find_shenava_ctc, scan_models
 from .engines import Engine, TranscriptionError, load_engine
 from .jalali import to_jalali
+from .marketplace.api import router as marketplace_router
+from .marketplace.service import bootstrap as bootstrap_marketplace
 from .whatsapp import attach_message, send_text
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
@@ -128,6 +130,7 @@ class AppState:
         self.dialogue = DialogueManager(db_path=db_path)
         self.db_path = db_path
         init_db(db_path)
+        bootstrap_marketplace(db_path)
         self.refresh()
 
     def refresh(self) -> None:
@@ -204,17 +207,22 @@ class AppState:
 
 state = AppState()
 app = FastAPI(title="رزرو نوبت نمایندگی خودرو", version="2.0.0")
+app.state.marketplace_db = state.db_path
+app.include_router(marketplace_router)
 
 
 def reset_state(models_dir: str | Path | None = None, db_path: Path | None = None) -> AppState:
     global state
     state = AppState(models_dir, db_path=db_path)
+    app.state.marketplace_db = state.db_path
     return state
 
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    from .booking import default_db_path
+
+    return {"status": "ok", "data_file": str(default_db_path())}
 
 
 @app.get("/api/state")
@@ -484,6 +492,16 @@ def customer_calendar(token: str) -> FileResponse:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/buyer")
+def buyer_portal() -> FileResponse:
+    return FileResponse(STATIC_DIR / "buyer.html")
+
+
+@app.get("/office")
+def office_portal() -> FileResponse:
+    return FileResponse(STATIC_DIR / "office.html")
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

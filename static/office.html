@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>دفتر مرکز</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css?v=35" />
+    <link rel="stylesheet" href="/static/portal.css?v=35" />
+  </head>
+  <body class="portal-page">
+    <div class="backdrop"></div>
+    <header class="topbar compact">
+      <div>
+        <p class="eyebrow">مرکز کارشناسی</p>
+        <h1>دفتر</h1>
+      </div>
+      <div class="pills">
+        <a class="path-chip" href="/">تماس</a>
+        <a class="path-chip" href="/buyer">خریدار</a>
+      </div>
+    </header>
+    <main class="shell portal">
+      <section id="auth-box" class="panel">
+        <h2>ورود دفتر</h2>
+        <form id="login-form" class="stack">
+          <input name="email" type="email" value="office@center.local" />
+          <input name="password" type="password" value="Office123!" />
+          <button class="start" type="submit">ورود</button>
+          <p id="auth-msg" class="hint"></p>
+        </form>
+      </section>
+      <div id="app-box" class="hidden">
+        <nav class="tabs" id="office-tabs">
+          <button type="button" class="on" data-tab="appts">نوبت‌ها</button>
+          <button type="button" data-tab="cars">مشتری</button>
+          <button type="button" data-tab="archive">نتایج</button>
+          <button type="button" data-tab="buyers">خریداران</button>
+          <button class="ghost" id="logout-btn" type="button">خروج</button>
+        </nav>
+        <section class="panel pane on" data-pane="appts">
+          <div class="day-nav">
+            <button class="ghost" type="button" id="appt-prev">روز قبل</button>
+            <strong id="appt-label">امروز</strong>
+            <button class="ghost" type="button" id="appt-next">روز بعد</button>
+            <button class="ghost" type="button" id="appt-today">امروز</button>
+          </div>
+          <div class="actions">
+            <button class="ghost" id="open-appt" type="button">ثبت نوبت</button>
+            <button class="start" id="open-express" type="button">ثبت فوری</button>
+          </div>
+          <div id="appt-sheet" class="sheet hidden">
+          <form id="appt-form" class="vehicle-form sheet-box">
+            <input type="hidden" name="appointment_id" value="" />
+            <input type="hidden" name="date" id="appt-date" required />
+            <input type="hidden" name="time" id="appt-time" required />
+            <h4>ثبت نوبت</h4>
+            <div class="picker" data-picker="appt">
+              <button class="pick-toggle" type="button">انتخاب تاریخ و ساعت</button>
+              <div class="pick-pop hidden">
+                <div class="cal-nav">
+                  <button class="ghost pick-prev" type="button">ماه قبل</button>
+                  <strong class="pick-month">تقویم</strong>
+                  <button class="ghost pick-next" type="button">ماه بعد</button>
+                </div>
+                <div class="weekdays"><span>ش</span><span>ی</span><span>د</span><span>س</span><span>چ</span><span>پ</span><span>ج</span></div>
+                <div class="weeks"></div>
+                <div class="time-selects">
+                  <label><span>ساعت</span><select class="pick-hour"></select></label>
+                  <label><span>دقیقه</span><select class="pick-minute"></select></label>
+                </div>
+                <button class="start pick-done" type="button">تأیید</button>
+              </div>
+            </div>
+            <input name="customer_name" placeholder="نام مشتری" />
+            <input name="customer_phone" placeholder="تلفن" />
+            <div class="actions">
+              <button class="start" type="submit">ثبت نوبت</button>
+              <button class="ghost" id="cancel-edit" type="button">بستن</button>
+            </div>
+          </form>
+          </div>
+          <div id="express-sheet" class="sheet hidden">
+          <form id="express-form" class="vehicle-form sheet-box">
+            <h4>ثبت فوری</h4>
+            <input type="hidden" name="date" />
+            <input type="hidden" name="time" />
+            <div class="picker" data-picker="express">
+              <button class="pick-toggle" type="button">انتخاب تاریخ و ساعت</button>
+              <div class="pick-pop hidden">
+                <div class="cal-nav">
+                  <button class="ghost pick-prev" type="button">ماه قبل</button>
+                  <strong class="pick-month">تقویم</strong>
+                  <button class="ghost pick-next" type="button">ماه بعد</button>
+                </div>
+                <div class="weekdays"><span>ش</span><span>ی</span><span>د</span><span>س</span><span>چ</span><span>پ</span><span>ج</span></div>
+                <div class="weeks"></div>
+                <div class="time-selects">
+                  <label><span>ساعت</span><select class="pick-hour"></select></label>
+                  <label><span>دقیقه</span><select class="pick-minute"></select></label>
+                </div>
+                <button class="start pick-done" type="button">تأیید</button>
+              </div>
+            </div>
+            <input name="customer_name" placeholder="نام مشتری" />
+            <input name="customer_phone" placeholder="تلفن" />
+            <input name="brand" placeholder="برند" />
+            <input name="model" placeholder="مدل" />
+            <input name="year" placeholder="سال" />
+            <input name="starting_price" placeholder="شروع قیمت" />
+            <div class="actions">
+              <button class="ghost" type="submit" data-mode="ready">آماده مزایده</button>
+              <button class="start" type="submit" data-mode="publish">انتشار فوری</button>
+              <button class="ghost" id="close-express" type="button">بستن</button>
+            </div>
+          </form>
+          </div>
+          <div id="appts"></div>
+        </section>
+        <section class="panel pane" data-pane="cars">
+          <div id="vehicles"></div>
+        </section>
+        <section class="panel pane" data-pane="archive">
+          <div id="archive"></div>
+        </section>
+        <section class="panel pane" data-pane="buyers">
+          <div id="buyer-sheet" class="sheet hidden">
+          <form id="buyer-edit-form" class="vehicle-form sheet-box">
+            <h4>ویرایش پروفایل خریدار</h4>
+            <input type="hidden" name="buyer_id" />
+            <label class="spec-field"><span>نام</span><input name="contact_person" required /></label>
+            <label class="spec-field"><span>کد ملی</span><input name="national_id" /></label>
+            <label class="spec-field"><span>تلفن</span><input name="phone" /></label>
+            <label class="spec-field"><span>ایمیل</span><input name="email" type="email" /></label>
+            <label class="spec-field"><span>کسب‌وکار</span><input name="business_name" /></label>
+            <label class="spec-field"><span>شهر</span><input name="city" /></label>
+            <label class="spec-field wide"><span>نشانی</span><input name="address" /></label>
+            <div class="actions">
+              <button class="start" type="submit">ذخیره پروفایل</button>
+              <button class="ghost" id="buyer-edit-cancel" type="button">بستن</button>
+            </div>
+          </form>
+          </div>
+          <div id="buyers"></div>
+        </section>
+      </div>
+    </main>
+    <script src="/static/office.js?v=35"></script>
+  </body>
+</html>

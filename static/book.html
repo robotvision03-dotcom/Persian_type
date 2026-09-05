@@ -10,15 +10,15 @@
       href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/static/styles.css?v=6" />
+    <link rel="stylesheet" href="/static/styles.css?v=8" />
   </head>
   <body>
     <div class="backdrop"></div>
     <header class="topbar">
       <div>
-        <p class="eyebrow">واتساپ · تقویم نوبت</p>
+        <p class="eyebrow">تقویم نوبت</p>
         <h1>وقت خالی را انتخاب کنید</h1>
-        <p class="lede" id="book-lede">شنبه تا پنجشنبه ۹ تا ۱۷. جمعه تعطیل است.</p>
+        <p class="lede hidden" id="book-lede"></p>
       </div>
     </header>
     <main class="workspace dealership book-page">
@@ -31,13 +31,13 @@
         </div>
         <div class="weekdays" id="weekdays"></div>
         <div class="weeks" id="weeks"></div>
-        <p id="day-label" class="hint">یک روز کاری را بزنید تا ساعت‌های خالی دیده شود.</p>
+        <p id="day-label" class="hint"></p>
         <div id="times" class="times"></div>
         <div class="book-actions">
           <button type="button" id="confirm-btn" class="start" disabled>ثبت این وقت</button>
         </div>
       </section>
     </main>
-    <script src="/static/book.js?v=6"></script>
+    <script src="/static/book.js?v=7"></script>
   </body>
 </html>

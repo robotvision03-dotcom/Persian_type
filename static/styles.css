@@ -120,6 +120,35 @@ body {
   white-space: nowrap;
 }
 
+a.path-chip {
+  text-decoration: none;
+  color: var(--text);
+  direction: rtl;
+}
+
+.https-banner {
+  margin: 0 22px 12px;
+  padding: 12px 16px;
+  border: 1px solid #c9852a;
+  background: rgba(201, 133, 42, 0.18);
+  color: var(--text);
+  border-radius: 12px;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.https-banner a {
+  color: #f0c27a;
+  font-weight: 700;
+  margin-inline-start: 6px;
+  direction: ltr;
+  display: inline-block;
+}
+
+.https-banner.hidden {
+  display: none;
+}
+
 .model-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
