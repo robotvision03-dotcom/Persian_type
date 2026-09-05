@@ -13,6 +13,7 @@ APP_DIR="${HETZNER_APP_DIR:-/opt/persian-type}"
 BRANCH="${HETZNER_BRANCH:-cursor/bid-7156}"
 REPO_URL="${HETZNER_REPO:-https://github.com/robotvision03-dotcom/Persian_type.git}"
 KEY_FILE="${HETZNER_SSH_KEY_FILE:-$HOME/.ssh/hetzner_persian_type}"
+DOWNLOAD_ASR="${HETZNER_DOWNLOAD_ASR:-1}"
 
 if [[ -n "${HETZNER_SSH_KEY:-}" && "${HETZNER_SSH_KEY}" == *"BEGIN"* ]]; then
   KEY_FILE="$(mktemp)"
@@ -27,21 +28,21 @@ if [[ ! -f "$KEY_FILE" ]]; then
 fi
 
 SSH=(ssh -i "$KEY_FILE" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new)
-SCP=(scp -i "$KEY_FILE" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new)
 
 echo "Checking SSH to ${USER_NAME}@${HOST}..."
 "${SSH[@]}" "${USER_NAME}@${HOST}" 'echo connected; hostname; whoami'
 
 echo "Installing packages and app on ${HOST}..."
-"${SSH[@]}" "${USER_NAME}@${HOST}" bash -s -- "$APP_DIR" "$REPO_URL" "$BRANCH" <<'REMOTE'
+"${SSH[@]}" "${USER_NAME}@${HOST}" bash -s -- "$APP_DIR" "$REPO_URL" "$BRANCH" "$DOWNLOAD_ASR" <<'REMOTE'
 set -euo pipefail
 APP_DIR="$1"
 REPO_URL="$2"
 BRANCH="$3"
+DOWNLOAD_ASR="$4"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y python3 python3-venv python3-pip git nginx
+apt-get install -y python3 python3-venv python3-pip git nginx curl
 
 mkdir -p "$APP_DIR"
 if [[ -d "$APP_DIR/.git" ]]; then
@@ -58,6 +59,13 @@ python3 -m venv .venv
 pip install --upgrade pip
 pip install -r requirements.txt
 
+mkdir -p /var/lib/persian-type
+mkdir -p "$APP_DIR/models"
+
+if [[ "$DOWNLOAD_ASR" == "1" ]]; then
+  bash "$APP_DIR/scripts/download_shenava_ctc.sh" "$APP_DIR/models"
+fi
+
 cat >/etc/systemd/system/persian-type.service <<EOF
 [Unit]
 Description=Persian Type dealership portal
@@ -67,7 +75,9 @@ After=network.target
 Type=simple
 WorkingDirectory=$APP_DIR
 Environment=PYTHONUNBUFFERED=1
-ExecStart=$APP_DIR/.venv/bin/python -m uvicorn app.server:app --host 127.0.0.1 --port 8000
+Environment=PERSIAN_TYPE_DATA=/var/lib/persian-type
+Environment=MODELS_DIR=$APP_DIR/models
+ExecStart=$APP_DIR/.venv/bin/python -m app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=3
 User=root
@@ -87,11 +97,14 @@ server {
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_read_timeout 3600;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
     }
 }
 EOF
@@ -103,6 +116,11 @@ systemctl daemon-reload
 systemctl enable --now persian-type
 systemctl restart persian-type
 systemctl reload nginx
+
+# Give the app a moment, then warm the ASR model into memory.
+sleep 2
+curl -fsS -X POST http://127.0.0.1:8000/api/boot || true
+echo
 
 if command -v ufw >/dev/null 2>&1; then
   ufw allow OpenSSH || true
@@ -119,3 +137,4 @@ REMOTE
 echo "Public URL: http://${HOST}/"
 echo "Office: http://${HOST}/office"
 echo "Buyer:  http://${HOST}/buyer"
+echo "Voice:  open the site, wait for boot, then شروع تماس"
