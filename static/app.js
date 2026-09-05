@@ -209,7 +209,7 @@ function renderHours(data) {
     box.appendChild(btn);
   });
   if (!(data.all || []).length) {
-    box.innerHTML = "<p class='hint'>این روز دفتر باز نیست. روز کاری بعد را از تقویم بزنید.</p>";
+    box.innerHTML = "<p class='hint'>تعطیل است.</p>";
   }
 }
 

@@ -376,7 +376,6 @@ function renderInspection(car) {
     .join("");
   return `<form class="inspection-form" data-id="${car.id}">
     <h4>گزارش کارشناسی</h4>
-    <p class="hint">مثل همراه مکانیک، پیش‌فرض همه قطعات سالم است. فقط استثنا را عوض کنید.</p>
     <div class="body-map">${bodyMap}</div>
     <label class="spec-field wide"><span>خلاصه کارشناسی</span><input name="summary" value="${escapeHtml(summary)}" /></label>
     ${blocks}
