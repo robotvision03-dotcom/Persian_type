@@ -256,6 +256,34 @@
   gap: 6px;
 }
 
+.customers-table .appt-actions,
+.customers-table .live-actions {
+  min-width: 11rem;
+}
+
+.customers-table td {
+  vertical-align: middle;
+}
+
+.customers-table small {
+  color: var(--muted);
+}
+
+.detail-row td {
+  padding-top: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.detail-row .inspect-wrap:empty,
+.detail-row .bid-box:empty {
+  display: none;
+}
+
+.detail-row .inspect-wrap,
+.detail-row .bid-box {
+  margin: 0 0 12px;
+}
+
 .badge-off {
   color: var(--gold);
   font-size: 0.78rem;

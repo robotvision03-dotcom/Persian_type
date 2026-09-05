@@ -527,6 +527,15 @@ def office_approve(vehicle_id: int, request: Request, authorization: str | None 
         raise wrap(extra) from extra
 
 
+@router.delete("/office/vehicles/{vehicle_id}")
+def office_remove_vehicle(vehicle_id: int, request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    staff_user(request, authorization)
+    try:
+        return svc.remove_vehicle(vehicle_id, db(request))
+    except svc.MarketplaceError as extra:
+        raise wrap(extra) from extra
+
+
 @router.post("/office/vehicles/{vehicle_id}/publish")
 def office_publish(vehicle_id: int, body: PublishBody | None = None, request: Request = None, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     user = staff_user(request, authorization)

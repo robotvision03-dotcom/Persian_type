@@ -57,6 +57,7 @@ const STATUS_LABELS = {
   BIDDING_ENDED: "مزایده تمام",
   AUCTION_SUSPENDED: "تعلیق مزایده",
   SOLD: "فروخته شد",
+  REMOVED: "حذف شده",
   CANCELLED: "لغو شده",
   ACTIVE: "فعال",
   ENDED: "تمام شده",
@@ -169,6 +170,42 @@ function pipelineHtml(car, auction) {
   return `<ol class="pipe">${labels
     .map((label, index) => `<li class="${index < step ? "done" : index === step - 1 ? "now" : ""}">${escapeHtml(label)}</li>`)
     .join("")}</ol>`;
+}
+
+function outcomeLabel(status, auctionStatus) {
+  const key = String(status || "");
+  if (key === "SOLD") return "فروخته شد";
+  if (key === "BIDDING_ACTIVE" || auctionStatus === "ACTIVE") return "در مزایده";
+  if (key === "AUCTION_SUSPENDED" || auctionStatus === "SUSPENDED") return "تعلیق مزایده";
+  if (key === "BIDDING_ENDED" || auctionStatus === "ENDED") return "مزایده تمام";
+  if (key === "READY_FOR_BIDDING" || key === "PENDING_OFFICE_APPROVAL" || key === "INSPECTION_COMPLETED") return "در صف مزایده";
+  if (key === "INSPECTION_IN_PROGRESS") return "در کارشناسی";
+  if (key === "CUSTOMER_ARRIVED" || key === "APPOINTMENT_SCHEDULED") return "ورود";
+  if (key === "REMOVED" || key === "CANCELLED") return "حذف شده";
+  return statusLabel(key) || "—";
+}
+
+function customerActions(car, auction, winner) {
+  const bits = [];
+  const active = auction && auction.status === "ACTIVE";
+  if (!car.inspection_completed) {
+    bits.push(`<button class="ghost inspect" type="button" data-id="${car.id}">کارشناسی</button>`);
+  }
+  if (car.inspection_completed && !active) {
+    const republish = car.status !== "READY_FOR_BIDDING" && !car.published_for_bidding;
+    bits.push(`<button class="start publish" type="button" data-id="${car.id}">${republish ? "مزایده دوباره" : "انتشار"}</button>`);
+  }
+  if (active) {
+    bits.push(`<button class="ghost suspend-auc" type="button" data-id="${auction.id}">تعلیق</button>`);
+    bits.push(`<button class="ghost view-bids" type="button" data-id="${auction.id}">پیشنهادها</button>`);
+  }
+  if (winner) {
+    bits.push(`<button class="start accept" type="button" data-id="${auction.id}">پذیرش</button>`);
+    bits.push(`<button class="ghost reject" type="button" data-id="${auction.id}">رد</button>`);
+  }
+  bits.push(`<button class="ghost toggle-inspect" type="button" data-open="${car.id}">جزئیات</button>`);
+  bits.push(`<button class="ghost remove-car" type="button" data-id="${car.id}">حذف</button>`);
+  return bits.join("");
 }
 
 function showPane(id) {
@@ -289,7 +326,7 @@ function renderArchive(rows) {
     box.innerHTML = `<p class="empty">نتیجه‌ای ثبت نشده است.</p>`;
     return;
   }
-  box.innerHTML = `<table class="results-table"><thead><tr><th>خودرو</th><th>مالک</th><th>تلفن</th><th>کارشناسی</th><th>مزایده</th></tr></thead><tbody>${lastArchive
+  box.innerHTML = `<table class="results-table"><thead><tr><th>خودرو</th><th>مالک</th><th>تلفن</th><th>وضعیت</th><th>کارشناسی</th><th>مزایده</th></tr></thead><tbody>${lastArchive
     .map(
       (row) => `<tr>
         <td>
@@ -297,10 +334,11 @@ function renderArchive(rows) {
         </td>
         <td>${escapeHtml(row.customer_name || "—")}</td>
         <td dir="ltr">${escapeHtml(row.customer_phone || "—")}</td>
+        <td><span class="verdict ${row.status === "SOLD" ? "ok" : row.status === "AUCTION_SUSPENDED" ? "paused" : ""}">${escapeHtml(row.outcome_label || outcomeLabel(row.status, row.auction_status))}</span></td>
         <td><span class="verdict ${row.verdict === "تعلیق شده" ? "paused" : "ok"}">${escapeHtml(row.verdict || row.list_label || "")}</span></td>
         <td>${row.can_rebid ? `<button class="ghost publish" type="button" data-id="${row.id}">مزایده دوباره</button>` : escapeHtml(statusLabel(row.auction_status) || "—")}</td>
       </tr>
-      <tr class="result-detail hidden" data-result="${row.id}"><td colspan="5">${renderBuyerInspection(row)}</td></tr>`
+      <tr class="result-detail hidden" data-result="${row.id}"><td colspan="6">${renderBuyerInspection(row)}</td></tr>`
     )
     .join("")}</tbody></table>`;
 }
@@ -458,24 +496,22 @@ async function refresh(options) {
   if ($("appt-label")) $("appt-label").textContent = dash.jalali || apptDay;
   if (live && editingForm()) {
     (dash.vehicles || []).forEach((car) => {
-      const card = document.querySelector(`[data-vehicle-id="${car.id}"]`);
-      if (!card) return;
+      const row = document.querySelector(`tr[data-vehicle-id="${car.id}"]`);
+      if (!row) return;
       const auction = activeAuction(car, dash.auctions);
-      const status = card.querySelector(".live-status");
-      if (status) status.textContent = `#${car.id} ${car.brand || "خودرو"} ${car.model || ""} — ${statusLabel(car.status)}`;
-      const flags = card.querySelector(".live-flags");
-      if (flags) flags.textContent = `کارشناسی: ${car.inspection_completed ? "تمام" : "نه"} · تأیید: ${car.office_approved ? "بله" : "نه"} · انتشار: ${car.published_for_bidding ? "بله" : "نه"}`;
-      const auc = card.querySelector(".live-auction");
       const winner = (dash.winners || []).find((item) => auction && item.auction_id === auction.id);
-      if (auc) {
-        auc.textContent = winner
-          ? `برنده ${winner.buyer_name || "#" + winner.buyer_id} · ${money(winner.final_price)} تومان · ${statusLabel(winner.status)}`
+      const status = row.querySelector(".live-status");
+      if (status) status.textContent = outcomeLabel(car.status, auction && auction.status);
+      const price = row.querySelector(".live-price");
+      if (price) {
+        price.textContent = winner
+          ? money(winner.final_price)
           : auction
-            ? `مزایده ${statusLabel(auction.status)} · فعلی ${money(auction.current_price)} · پایان ${auction.end_time || ""}`
-            : "مزایده‌ای فعال نیست";
+            ? money(auction.current_price)
+            : "—";
       }
-      const cancelBtn = card.querySelector(".cancel-auc");
-      if (cancelBtn && (!auction || auction.status !== "ACTIVE")) cancelBtn.remove();
+      const actions = row.querySelector(".live-actions");
+      if (actions) actions.innerHTML = customerActions(car, auction, winner);
     });
     lastWinners = dash.winners || [];
     lastBuyers = dash.buyers || [];
@@ -506,33 +542,23 @@ async function refresh(options) {
         </td></tr>`;
     })
     .join("")}</tbody></table>`;
-  $("vehicles").innerHTML = vehicles
-    .map((car) => {
-      const auction = activeAuction(car, dash.auctions);
-      const winner = (dash.winners || []).find((item) => auction && item.auction_id === auction.id);
-      const canRebid = car.inspection_completed && !(auction && auction.status === "ACTIVE");
-      return `<article class="card" data-vehicle-id="${car.id}">
-        <h3 class="live-status">#${car.id} ${escapeHtml(car.brand || "خودرو")} ${escapeHtml(car.model || "")} — ${escapeHtml(statusLabel(car.status))}</h3>
-        ${pipelineHtml(car, auction)}
-        <p>مالک ${escapeHtml(car.customer_name || "—")} · ${escapeHtml(car.customer_phone || "—")}</p>
-        <p class="live-flags">کارشناسی: ${car.inspection_completed ? "تمام" : "نه"} · تأیید: ${car.office_approved ? "بله" : "نه"} · انتشار: ${car.published_for_bidding ? "بله" : "نه"}</p>
-        <p class="live-auction">${auction ? `مزایده ${escapeHtml(statusLabel(auction.status))} · فعلی ${money(auction.current_price)} · پایان ${escapeHtml(auction.end_time || "")}` : "مزایده‌ای فعال نیست"}</p>
-        ${winner ? `<p>برنده ${escapeHtml(winner.buyer_name || "خریدار #" + winner.buyer_id)} · ${money(winner.final_price)} تومان · ${escapeHtml(statusLabel(winner.status))}</p>` : ""}
-        <div class="actions">
-          <button class="ghost inspect" type="button" data-id="${car.id}">شروع کارشناسی</button>
-          <button class="ghost approve" type="button" data-id="${car.id}">تأیید دفتر</button>
-          <button class="start publish" type="button" data-id="${car.id}">${canRebid && car.status !== "READY_FOR_BIDDING" && !car.published_for_bidding ? "مزایده دوباره" : "انتشار مزایده"}</button>
-          ${auction && auction.status === "ACTIVE" ? `<button class="ghost suspend-auc" type="button" data-id="${auction.id}">تعلیق مزایده</button>` : ""}
-          ${auction && auction.status === "ACTIVE" ? `<button class="ghost cancel-auc" type="button" data-id="${auction.id}">لغو مزایده</button>` : ""}
-          ${auction ? `<button class="ghost view-bids" type="button" data-id="${auction.id}">فهرست پیشنهادها</button>` : ""}
-          ${winner ? `<button class="start accept" type="button" data-id="${auction.id}">پذیرش برنده</button><button class="ghost reject" type="button" data-id="${auction.id}">رد برنده</button>` : ""}
-        </div>
-        ${auction ? `<div class="bid-box" data-bids="${auction.id}"></div>` : ""}
-        <button class="ghost toggle-inspect" type="button" data-open="${car.id}">کارشناسی و مشخصات</button>
-        <div class="inspect-wrap hidden" data-inspect="${car.id}"></div>
-      </article>`;
-    })
-    .join("");
+  $("vehicles").innerHTML = vehicles.length
+    ? `<table class="results-table customers-table"><thead><tr><th>مشتری</th><th>خودرو</th><th>وضعیت</th><th>مبلغ</th><th></th></tr></thead><tbody>${vehicles
+        .map((car) => {
+          const auction = activeAuction(car, dash.auctions);
+          const winner = (dash.winners || []).find((item) => auction && item.auction_id === auction.id);
+          const price = winner ? money(winner.final_price) : auction ? money(auction.current_price) : "—";
+          return `<tr data-vehicle-id="${car.id}">
+            <td>${escapeHtml(car.customer_name || "—")}<br /><small dir="ltr">${escapeHtml(car.customer_phone || "")}</small></td>
+            <td><button class="name-link toggle-inspect" type="button" data-open="${car.id}">${escapeHtml(car.brand || "خودرو")} ${escapeHtml(car.model || "")} ${car.year || ""}</button></td>
+            <td class="live-status">${escapeHtml(outcomeLabel(car.status, auction && auction.status))}</td>
+            <td class="live-price">${price}</td>
+            <td class="live-actions appt-actions">${customerActions(car, auction, winner)}</td>
+          </tr>
+          <tr class="detail-row"><td colspan="5"><div class="inspect-wrap hidden" data-inspect="${car.id}"></div>${auction ? `<div class="bid-box" data-bids="${auction.id}"></div>` : ""}</td></tr>`;
+        })
+        .join("")}</tbody></table>`
+    : `<p class="empty">مشتری در جریان نیست.</p>`;
   lastVehicles = vehicles;
   if (pendingInspectId) {
     openInspect(pendingInspectId);
@@ -910,7 +936,11 @@ document.addEventListener("click", async (event) => {
       pendingInspectId = id;
       showPane("cars");
     }
-    if (btn.classList.contains("approve")) await api(`/office/vehicles/${id}/approve`, { method: "POST" });
+    if (btn.classList.contains("remove-car")) {
+      if (!confirm("این مشتری از فهرست حذف شود؟")) return;
+      await api(`/office/vehicles/${id}`, { method: "DELETE" });
+      showPane("cars");
+    }
     if (btn.classList.contains("publish")) {
       await api(`/office/vehicles/${id}/publish`, { method: "POST", body: JSON.stringify({}) });
       showPane("cars");

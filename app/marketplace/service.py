@@ -883,6 +883,28 @@ def _sync_owner(conn: Any, vehicle_id: int) -> None:
     )
 
 
+def vehicle_outcome_label(status: str, auction_status: str = "") -> str:
+    key = str(status or "")
+    auction = str(auction_status or "")
+    if key == "SOLD":
+        return "فروخته شد"
+    if key == "BIDDING_ACTIVE" or auction == "ACTIVE":
+        return "در مزایده"
+    if key in {"AUCTION_SUSPENDED"} or auction == "SUSPENDED":
+        return "تعلیق مزایده"
+    if key == "BIDDING_ENDED" or auction == "ENDED":
+        return "مزایده تمام"
+    if key in {"READY_FOR_BIDDING", "PENDING_OFFICE_APPROVAL", "INSPECTION_COMPLETED"}:
+        return "در صف مزایده"
+    if key == "INSPECTION_IN_PROGRESS":
+        return "در کارشناسی"
+    if key in {"CUSTOMER_ARRIVED", "APPOINTMENT_SCHEDULED"}:
+        return "ورود"
+    if key in {"CANCELLED", "REMOVED"}:
+        return "حذف شده"
+    return key or "—"
+
+
 def list_inspected_vehicles(db_path: Path | None = None) -> list[dict[str, Any]]:
     latest_auctions: dict[int, dict[str, Any]] = {}
     with get_conn(db_path) as conn:
@@ -898,6 +920,8 @@ def list_inspected_vehicles(db_path: Path | None = None) -> list[dict[str, Any]]
     for car in list_vehicles(db_path, pipeline_only=False):
         inspection = car.get("inspection") or {}
         status = str(car.get("status") or "")
+        if status in {"CANCELLED", "REMOVED"}:
+            continue
         auction = latest_auctions.get(int(car["id"])) or {}
         registered = bool(
             car.get("inspection_completed")
@@ -917,6 +941,7 @@ def list_inspected_vehicles(db_path: Path | None = None) -> list[dict[str, Any]]
         else:
             verdict = "در حال کارشناسی"
         report = inspection.get("public_report") or public_report(inspection.get("report"))
+        auction_status = auction.get("status") or ""
         cars.append(
             {
                 "id": car["id"],
@@ -942,8 +967,9 @@ def list_inspected_vehicles(db_path: Path | None = None) -> list[dict[str, Any]]
                 "finished": finished,
                 "verdict": verdict,
                 "list_label": verdict,
+                "outcome_label": vehicle_outcome_label(status, auction_status),
                 "can_rebid": bool(finished and status != "BIDDING_ACTIVE"),
-                "auction_status": auction.get("status") or "",
+                "auction_status": auction_status,
                 "inspection_summary": car.get("inspection_summary") or (report or {}).get("summary") or "",
                 "inspection": report,
                 "updated_at": car.get("updated_at") or "",
@@ -1105,7 +1131,7 @@ def finalize_inspection(
         strengths = json.dumps((normalized or empty_report()).get("strengths") or [], ensure_ascii=False)
         conn.execute(
             """
-            UPDATE vehicles SET status = 'PENDING_OFFICE_APPROVAL', inspection_completed = 1,
+            UPDATE vehicles SET status = 'READY_FOR_BIDDING', inspection_completed = 1, office_approved = 1,
                 inspection_summary = COALESCE(NULLIF(?, ''), inspection_summary),
                 strengths = CASE WHEN strengths IN ('', '[]') THEN ? ELSE strengths END,
                 updated_at = ?
@@ -1130,6 +1156,27 @@ def approve_vehicle(vehicle_id: int, db_path: Path | None = None, now: datetime 
     with get_conn(db_path) as conn:
         conn.execute(
             "UPDATE vehicles SET status = 'READY_FOR_BIDDING', office_approved = 1, updated_at = ? WHERE id = ?",
+            (stamp, vehicle_id),
+        )
+        bump_live(conn)
+    return get_vehicle(vehicle_id, db_path)
+
+
+def remove_vehicle(vehicle_id: int, db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
+    vehicle = get_vehicle(vehicle_id, db_path)
+    if vehicle["status"] == "SOLD":
+        raise MarketplaceError("خودروی فروخته‌شده را نمی‌توان حذف کرد.", 409)
+    active = auction_for_vehicle(vehicle_id, db_path)
+    if active and active.get("status") == "ACTIVE":
+        cancel_auction(int(active["id"]), db_path=db_path, now=now)
+    stamp = now_iso(now)
+    with get_conn(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE vehicles
+            SET status = 'CANCELLED', published_for_bidding = 0, updated_at = ?
+            WHERE id = ?
+            """,
             (stamp, vehicle_id),
         )
         bump_live(conn)

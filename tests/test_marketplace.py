@@ -843,6 +843,20 @@ class OfficePipelineTests(unittest.TestCase):
             with self.assertRaises(svc.MarketplaceError):
                 svc.publish_vehicle(vehicle["id"], db_path=path, now=when)
 
+    def test_remove_customer_vehicle_from_pipeline(self):
+        tmp, path = _db()
+        with tmp:
+            when = datetime(2026, 9, 5, 9, 0, 0)
+            _appt, vehicle, auction = _pipeline(path, now=when)
+            removed = svc.remove_vehicle(vehicle["id"], db_path=path, now=when)
+            self.assertEqual(removed["status"], "CANCELLED")
+            self.assertFalse(any(item["id"] == vehicle["id"] for item in svc.list_vehicles(path, pipeline_only=True)))
+            self.assertFalse(any(item["id"] == vehicle["id"] for item in svc.list_inspected_vehicles(path)))
+            self.assertEqual(svc.get_auction(auction["id"], path)["status"], "CANCELLED")
+            self.assertEqual(svc.vehicle_outcome_label("SOLD"), "فروخته شد")
+            self.assertEqual(svc.vehicle_outcome_label("READY_FOR_BIDDING"), "در صف مزایده")
+            self.assertEqual(svc.vehicle_outcome_label("BIDDING_ACTIVE"), "در مزایده")
+
 
 if __name__ == "__main__":
     unittest.main()
