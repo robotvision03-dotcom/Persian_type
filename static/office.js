@@ -277,6 +277,25 @@ function activeAuction(car, auctions) {
   return (auctions || []).find((item) => item.vehicle_id === car.id && item.status !== "CANCELLED");
 }
 
+function renderArchive(rows) {
+  const box = $("archive");
+  if (!box) return;
+  if (!(rows || []).length) {
+    box.innerHTML = `<p class="empty">خودروی کارشناسی‌شده‌ای نیست.</p>`;
+    return;
+  }
+  box.innerHTML = `<table class="appts"><thead><tr><th>خودرو</th><th>مالک</th><th>تلفن</th><th>وضعیت</th></tr></thead><tbody>${(rows || [])
+    .map(
+      (row) => `<tr>
+        <td>#${row.id} ${escapeHtml(row.brand || "")} ${escapeHtml(row.model || "")} ${row.year || ""}</td>
+        <td>${escapeHtml(row.customer_name || "—")}</td>
+        <td dir="ltr">${escapeHtml(row.customer_phone || "—")}</td>
+        <td>${escapeHtml(row.status || "")}</td>
+      </tr>`
+    )
+    .join("")}</tbody></table>`;
+}
+
 function reportItems(car, categoryId) {
   const report = ((car.inspection || {}).report || {}).categories || {};
   return (report[categoryId] && report[categoryId].items) || {};
@@ -455,6 +474,7 @@ async function refresh(options) {
     renderPendingWinners(lastWinners);
     await loadNotes(lastWinners);
     lastBuyers = dash.buyers || [];
+    renderArchive(dash.archive || []);
     $("buyers").innerHTML = `<table class="appts"><thead><tr><th>خریدار</th><th>وضعیت</th><th></th></tr></thead><tbody>${(dash.buyers || [])
       .map(
         (row) => `<tr><td>${escapeHtml(row.contact_person || row.business_name || row.email)} · ${escapeHtml(row.phone || "—")} · کد ${escapeHtml(row.national_id || "—")} (#${row.id})</td><td>${escapeHtml(row.status)} / ${escapeHtml(row.verification_status)}</td>
@@ -490,6 +510,7 @@ async function refresh(options) {
       const winner = (dash.winners || []).find((item) => auction && item.auction_id === auction.id);
       return `<article class="card" data-vehicle-id="${car.id}">
         <h3 class="live-status">#${car.id} ${escapeHtml(car.brand || "خودرو")} ${escapeHtml(car.model || "")} — ${escapeHtml(car.status)}</h3>
+        <p>مالک ${escapeHtml(car.customer_name || "—")} · ${escapeHtml(car.customer_phone || "—")}</p>
         <p class="live-flags">کارشناسی: ${car.inspection_completed ? "تمام" : "نه"} · تأیید: ${car.office_approved ? "بله" : "نه"} · انتشار: ${car.published_for_bidding ? "بله" : "نه"}</p>
         <p class="live-auction">${auction ? `مزایده ${escapeHtml(auction.status)} · فعلی ${money(auction.current_price)} · پایان ${escapeHtml(auction.end_time || "")}` : "مزایده‌ای فعال نیست"}</p>
         ${winner ? `<p class="notice-win">برنده ${escapeHtml(winner.buyer_name || "خریدار #" + winner.buyer_id)} · ${money(winner.final_price)} تومان · ${escapeHtml(winner.status)}</p>` : ""}
@@ -513,6 +534,7 @@ async function refresh(options) {
     pendingInspectId = null;
   }
   lastBuyers = dash.buyers || [];
+  renderArchive(dash.archive || []);
   $("buyers").innerHTML = `<table class="appts"><thead><tr><th>خریدار</th><th>وضعیت</th><th></th></tr></thead><tbody>${(dash.buyers || [])
     .map(
       (row) => `<tr><td>${escapeHtml(row.contact_person || row.business_name || row.email)} · ${escapeHtml(row.phone || "—")} · کد ${escapeHtml(row.national_id || "—")} (#${row.id})</td><td>${escapeHtml(row.status)} / ${escapeHtml(row.verification_status)}</td>

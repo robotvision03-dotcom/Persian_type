@@ -118,12 +118,12 @@ function showInvite(invite) {
   const sent = invite.whatsapp_sent || {};
   if (sent.ok) {
     $("invite-text").textContent = sent.queued
-      ? `لینک تقویم از واتساپ وب ${from} در حال ارسال است. پنجره واتساپ را باز بگذارید و این رایانه را جلو بگذارید.`
-      : `لینک تقویم از واتساپ ${from} برای مشتری ارسال شد.`;
+      ? `ارسال لینک از ${from}`
+      : `لینک ارسال شد.`;
   } else if (sent.error) {
-    $("invite-text").textContent = `ارسال خودکار واتساپ از ${from} انجام نشد. ${sent.error}`;
+    $("invite-text").textContent = sent.error;
   } else {
-    $("invite-text").textContent = `لینک تقویم از واتساپ ${from} برای مشتری ارسال شد.`;
+    $("invite-text").textContent = `لینک ارسال شد.`;
   }
 }
 
@@ -188,8 +188,8 @@ $("weekdays").innerHTML = ["ش", "ی", "د", "س", "چ", "پ", "ج"].map((d) => 
 function renderHours(data) {
   if (!data) return;
   $("day-label").textContent = data.open
-    ? `ساعت‌های خالی ${data.jalali || data.date} — شنبه تا پنجشنبه ۹ تا ۱۷، جمعه تعطیل`
-    : `${data.jalali || data.date} جمعه است و دفتر تعطیل است.`;
+    ? `ساعت‌های خالی ${data.jalali || data.date}`
+    : `${data.jalali || data.date} تعطیل است.`;
   const box = $("times");
   box.innerHTML = "";
   (data.all || []).forEach((time) => {

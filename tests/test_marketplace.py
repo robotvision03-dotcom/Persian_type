@@ -1,3 +1,4 @@
+import os
 import tempfile
 import threading
 import unittest
@@ -663,6 +664,67 @@ class MarketplaceApiTests(unittest.TestCase):
         self.assertEqual(hood["status"], "رنگ دارد")
         self.assertNotIn("customer_name", listed[0])
         tmp.cleanup()
+
+
+class ArchiveAndPersistenceTests(unittest.TestCase):
+    def test_finished_inspection_is_kept_with_owner_contact(self):
+        tmp, path = _db()
+        with tmp:
+            when = datetime(2026, 9, 5, 9, 0, 0)
+            appt = svc.create_appointment(
+                "2026-09-05",
+                "10:30",
+                "علی رضایی",
+                "09120000000",
+                db_path=path,
+                now=when,
+            )
+            vehicle = next(item for item in svc.list_vehicles(path) if item["appointment_id"] == appt["id"])
+            svc.start_inspection(vehicle["id"], db_path=path, now=when)
+            saved = svc.finalize_inspection(vehicle["id"], "سالم", db_path=path, now=when)
+            self.assertTrue(saved["inspection_completed"])
+            self.assertEqual(saved["customer_name"], "علی رضایی")
+            self.assertEqual(saved["customer_phone"], "09120000000")
+            archive = svc.list_inspected_vehicles(path)
+            self.assertEqual(len(archive), 1)
+            self.assertEqual(archive[0]["customer_name"], "علی رضایی")
+            self.assertEqual(archive[0]["customer_phone"], "09120000000")
+            self.assertNotIn("vin", archive[0])
+            dash = svc.office_dashboard(path, now=when)
+            self.assertEqual(dash["archive"][0]["customer_phone"], "09120000000")
+
+    def test_existing_sqlite_survives_path_upgrade(self):
+        import app.booking as booking
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo_data = root / "data"
+            durable = root / "appdata"
+            repo_data.mkdir()
+            src = repo_data / "bookings.sqlite"
+            src.write_text("saved-records", encoding="utf-8")
+            previous = booking.DATA_DIR
+            previous_db = os.environ.pop("PERSIAN_TYPE_DB", None)
+            previous_data = os.environ.pop("PERSIAN_TYPE_DATA", None)
+            try:
+                booking.DATA_DIR = repo_data
+                os.environ["PERSIAN_TYPE_DATA"] = str(durable)
+                path = booking.default_db_path()
+                self.assertEqual(path, durable / "bookings.sqlite")
+                self.assertEqual(path.read_text(encoding="utf-8"), "saved-records")
+                src.write_text("changed-in-repo", encoding="utf-8")
+                again = booking.default_db_path()
+                self.assertEqual(again.read_text(encoding="utf-8"), "saved-records")
+            finally:
+                booking.DATA_DIR = previous
+                if previous_db is None:
+                    os.environ.pop("PERSIAN_TYPE_DB", None)
+                else:
+                    os.environ["PERSIAN_TYPE_DB"] = previous_db
+                if previous_data is None:
+                    os.environ.pop("PERSIAN_TYPE_DATA", None)
+                else:
+                    os.environ["PERSIAN_TYPE_DATA"] = previous_data
 
 
 if __name__ == "__main__":

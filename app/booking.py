@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, time as dtime
@@ -17,9 +19,45 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DB_PATH = DATA_DIR / "bookings.sqlite"
 
 
+def _copy_sqlite(src: Path, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    for suffix in ("-wal", "-shm", "-journal"):
+        extra = Path(str(src) + suffix)
+        if extra.exists():
+            shutil.copy2(extra, Path(str(dest) + suffix))
+
+
+def durable_db_dir() -> Path | None:
+    override = os.environ.get("PERSIAN_TYPE_DATA")
+    if override:
+        path = Path(override)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    root = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+    if not root:
+        return None
+    path = Path(root) / "PersianType"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def default_db_path() -> Path:
+    env = os.environ.get("PERSIAN_TYPE_DB")
+    if env:
+        path = Path(env)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+    repo_db = DATA_DIR / "bookings.sqlite"
+    durable = durable_db_dir()
+    if durable is not None:
+        dest = durable / "bookings.sqlite"
+        if repo_db.exists() and not dest.exists():
+            _copy_sqlite(repo_db, dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        return dest
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    return DB_PATH
+    return repo_db
 
 
 @contextmanager

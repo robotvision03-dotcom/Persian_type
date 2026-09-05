@@ -847,6 +847,27 @@ def list_vehicles(db_path: Path | None = None, pipeline_only: bool = False) -> l
     return [_hydrate_vehicle(row, inspections.get(row["id"])) for row in rows]
 
 
+def list_inspected_vehicles(db_path: Path | None = None) -> list[dict[str, Any]]:
+    cars = []
+    for car in list_vehicles(db_path, pipeline_only=False):
+        if not car.get("inspection_completed"):
+            continue
+        cars.append(
+            {
+                "id": car["id"],
+                "brand": car.get("brand") or "",
+                "model": car.get("model") or "",
+                "year": car.get("year"),
+                "customer_name": car.get("customer_name") or "",
+                "customer_phone": car.get("customer_phone") or "",
+                "status": car.get("status") or "",
+                "inspection_summary": car.get("inspection_summary") or "",
+                "updated_at": car.get("updated_at") or "",
+            }
+        )
+    return cars
+
+
 def update_vehicle(vehicle_id: int, fields: dict[str, Any], db_path: Path | None = None, now: datetime | str | None = None) -> dict[str, Any]:
     allowed = {
         "brand",
@@ -1702,6 +1723,7 @@ def office_dashboard(db_path: Path | None = None, now: datetime | str | None = N
         **day_meta,
         "appointments": appointments,
         "vehicles": list_vehicles(db_path, pipeline_only=True),
+        "archive": list_inspected_vehicles(db_path),
         "auctions": live_auctions,
         "winners": pending_winners,
         "buyers": list_buyers(db_path),

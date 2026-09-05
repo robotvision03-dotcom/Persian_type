@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/static/styles.css?v=9" />
+    <link rel="stylesheet" href="/static/styles.css?v=10" />
   </head>
   <body>
     <div class="backdrop"></div>
@@ -18,14 +18,6 @@
       <div>
         <p class="eyebrow">نمایشگاه · تماس زنده</p>
         <h1>خرید خودرو و رزرو نوبت بازدید</h1>
-        <p class="lede">
-          تقویم شمسی است؛ <strong>جمعه تعطیل</strong> و شنبه تا پنجشنبه از ۹ تا ۱۷ باز است.
-          ساعت‌های خالی از همان سلام منشی روی صفحه می‌ماند. نام خودرو را بگویید —
-          حتی اگر حرفی جا بیفتد (مثلاً سمن → سمند) از فهرست خودروهای موجود در ایران پیدا می‌شود.
-          بعد از نام، نرم‌افزار لینک را از <strong>واتساپ وب همین رایانه</strong>
-          (<span dir="ltr">+989032901549</span>) برای مشتری می‌فرستد. واتساپ وب را باز و وارد بگذارید.
-          اگر مشتری نوبت نگیرد، همان شماره یادآوری را بعد از ۱ ساعت، ۵ ساعت، و سپس هر روز تا ۳ روز می‌فرستد.
-        </p>
       </div>
       <div class="pills">
         <a class="path-chip" href="/office">دفتر مرکز</a>
@@ -64,7 +56,7 @@
           </div>
           <div class="weekdays" id="weekdays"></div>
           <div class="weeks" id="weeks"></div>
-          <p id="day-label" class="hint">شنبه تا پنجشنبه باز است. جمعه تعطیل است. ساعت‌های خالی همیشه پایین دیده می‌شود.</p>
+          <p id="day-label" class="hint">ساعت‌های خالی</p>
           <div id="times" class="times"></div>
         </section>
 
@@ -73,7 +65,7 @@
             <h2>ثبت‌شده بدون نوبت</h2>
             <button type="button" id="refresh-followups" class="ghost">بروزرسانی</button>
           </div>
-          <p class="hint">مشتریانی که ثبت شدند ولی هنوز از لینک تقویم نوبت نگرفتند. اگر لازم است ادمین تماس بگیرد.</p>
+          <p class="hint">هنوز نوبت نگرفته‌اند.</p>
           <div id="followups" class="empty">هنوز مشتری بدون نوبت نیست.</div>
         </section>
 
@@ -90,6 +82,6 @@
       <div class="spinner"></div>
       <p id="overlay-text">در حال آماده‌سازی...</p>
     </div>
-    <script src="/static/app.js?v=9"></script>
+    <script src="/static/app.js?v=10"></script>
   </body>
 </html>
