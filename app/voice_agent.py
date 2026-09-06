@@ -13,6 +13,10 @@ from .dialogue import DialogueManager
 DEFAULT_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime")
 DEFAULT_VOICE = os.environ.get("OPENAI_REALTIME_VOICE", "alloy")
 OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime"
+# free = local Shenava + browser speak (no card)
+# openai = paid OpenAI Realtime when key+credits exist
+# auto = openai if key present, else free
+PROVIDER = (os.environ.get("VOICE_AGENT_PROVIDER") or "free").strip().lower()
 _PLACEHOLDER_KEYS = {"sk-...", "sk-xxx", "your-key", "changeme", "replace-me"}
 
 
@@ -32,27 +36,52 @@ def api_key() -> str:
 
 
 def is_configured() -> bool:
+    """True only when OpenAI cloud voice is intentionally enabled."""
+    if PROVIDER in {"free", "local", "browser"}:
+        return False
+    if PROVIDER == "openai":
+        return bool(api_key())
+    # auto
     return bool(api_key())
 
 
 def status_payload() -> dict[str, Any]:
-    configured = is_configured()
+    key = api_key()
     raw = (os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_KEY") or "").strip()
-    if configured:
-        message = "عامل صوتی ابری آماده است (OpenAI Realtime GA)."
-    elif raw:
-        message = (
-            "کلید OPENAI_API_KEY نامعتبر است (مثلاً sk-... نمونه). "
-            "یک کلید واقعی از platform.openai.com بگذارید."
-        )
-    else:
-        message = "کلید OPENAI_API_KEY تنظیم نشده؛ تماس متنی / مدل محلی فعال است."
+    openai_ready = bool(key) and PROVIDER in {"openai", "auto"}
+    if openai_ready:
+        return {
+            "enabled": True,
+            "provider": "openai_realtime",
+            "mode": PROVIDER,
+            "model": DEFAULT_MODEL,
+            "voice": DEFAULT_VOICE,
+            "message": "عامل صوتی ابری آماده است (OpenAI Realtime GA).",
+            "free": False,
+        }
+    if PROVIDER in {"openai", "auto"} and raw and not key:
+        return {
+            "enabled": False,
+            "provider": "free_local_or_browser",
+            "mode": PROVIDER,
+            "model": None,
+            "voice": None,
+            "message": (
+                "کلید OPENAI_API_KEY نامعتبر است (مثلاً sk-... نمونه). "
+                "حالت رایگان فعال است."
+            ),
+            "free": True,
+        }
     return {
-        "enabled": configured,
-        "provider": "openai_realtime" if configured else None,
-        "model": DEFAULT_MODEL if configured else None,
-        "voice": DEFAULT_VOICE if configured else None,
-        "message": message,
+        "enabled": False,
+        "provider": "free_local_or_browser",
+        "mode": PROVIDER or "free",
+        "model": None,
+        "voice": None,
+        "message": (
+            "حالت رایگان فعال است: شنوا محلی یا تشخیص گفتار مرورگر (Chrome) — بدون کارت."
+        ),
+        "free": True,
     }
 
 

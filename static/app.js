@@ -641,6 +641,7 @@ async function hangup(statusText) {
   speaking = false;
   voiceMode = "local";
   window.speechSynthesis && window.speechSynthesis.cancel();
+  stopBrowserSpeech();
   if (socket && socket.readyState === WebSocket.OPEN) {
     try {
       socket.send(JSON.stringify({ type: "hangup", session_id: sessionId }));
@@ -661,6 +662,98 @@ async function hangup(statusText) {
   statusLine.textContent = statusText || "تماس تمام شد";
 }
 
+let browserRecognition = null;
+
+function stopBrowserSpeech() {
+  try {
+    if (browserRecognition) {
+      browserRecognition.onend = null;
+      browserRecognition.onerror = null;
+      browserRecognition.onresult = null;
+      browserRecognition.stop();
+    }
+  } catch (_error) {}
+  browserRecognition = null;
+}
+
+function browserSpeechSupported() {
+  return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+}
+
+async function sendSpokenTurn(text) {
+  const payload = await fetch("/api/call/turn", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, text }),
+  }).then((r) => r.json());
+  applyTurn(payload, text);
+  return payload;
+}
+
+async function startBrowserSpeechAgent() {
+  if (!browserSpeechSupported()) {
+    throw new Error("این مرورگر تشخیص گفتار رایگان ندارد. Chrome را امتحان کنید.");
+  }
+  if (!window.isSecureContext || location.protocol !== "https:") {
+    throw new Error(micErrorMessage({ name: "SecurityError" }));
+  }
+  voiceMode = "browser";
+  await beginSession();
+  // Mic permission prompt (also needed on some browsers before SpeechRecognition).
+  const stream = await requestMicrophone();
+  stream.getTracks().forEach((track) => track.stop());
+
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  browserRecognition = new Recognition();
+  browserRecognition.lang = "fa-IR";
+  browserRecognition.continuous = true;
+  browserRecognition.interimResults = true;
+  browserRecognition.maxAlternatives = 1;
+
+  browserRecognition.onresult = (event) => {
+    let interim = "";
+    let finalText = "";
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      const piece = event.results[i][0].transcript || "";
+      if (event.results[i].isFinal) finalText += piece;
+      else interim += piece;
+    }
+    if (interim) partialLine.textContent = interim;
+    if (finalText.trim() && !awaitingTurn) {
+      awaitingTurn = true;
+      partialLine.textContent = "در حال فهمیدن جواب...";
+      sendSpokenTurn(finalText.trim())
+        .catch((error) => {
+          statusLine.textContent = error.message || String(error);
+        })
+        .finally(() => {
+          awaitingTurn = false;
+          if (inCall) partialLine.textContent = "گوش می‌دهم...";
+        });
+    }
+  };
+  browserRecognition.onerror = (event) => {
+    if (event.error === "not-allowed") {
+      statusLine.textContent = "اجازه میکروفون داده نشد.";
+      return;
+    }
+    if (event.error !== "no-speech" && event.error !== "aborted") {
+      statusLine.textContent = "خطای تشخیص گفتار: " + event.error;
+    }
+  };
+  browserRecognition.onend = () => {
+    if (inCall && voiceMode === "browser" && browserRecognition) {
+      try {
+        browserRecognition.start();
+      } catch (_error) {}
+    }
+  };
+  browserRecognition.start();
+  asrChip.textContent = "تشخیص گفتار رایگان مرورگر";
+  partialLine.textContent = "گوش می‌دهم...";
+  statusLine.textContent = "حالت رایگان — میکروفون Chrome فعال است";
+}
+
 async function startCall() {
   if (inCall) return;
   setCallUi(true);
@@ -672,31 +765,43 @@ async function startCall() {
   } catch (_error) {
     cloud = null;
   }
-  if (cloud?.enabled) {
+
+  // Paid OpenAI only when explicitly enabled.
+  if (cloud?.enabled && cloud?.provider === "openai_realtime") {
     try {
       await startCloudVoiceAgent();
       return;
     } catch (error) {
-      const message = error.message || String(error);
-      statusLine.textContent = message + " — تلاش با مدل محلی/متن";
-      alert(message + "\nادامه با مسیر محلی/متنی.");
+      statusLine.textContent = (error.message || String(error)) + " — ادامه با حالت رایگان";
     }
   }
-  await beginSession();
+
+  // Free #1: local Persian Shenava on the VPS (no card).
   if (state?.ready) {
     try {
+      await beginSession();
       await startListening();
+      asrChip.textContent = state?.asr?.name_fa || "شنوا کوچیک CTC";
       partialLine.textContent = "گوش می‌دهم...";
-      statusLine.textContent = "میکروفون روشن است — گوش می‌دهم...";
+      statusLine.textContent = "حالت رایگان — شنوا محلی فعال است";
+      return;
     } catch (error) {
-      const message = error.message || String(error);
-      statusLine.textContent = message;
-      partialLine.textContent = "";
-      alert(message);
-      // Keep the text call alive so the user can still type answers.
+      statusLine.textContent = (error.message || String(error)) + " — تلاش با تشخیص مرورگر";
+      try { await hangup(""); } catch (_error) {}
+      setCallUi(true);
     }
-  } else {
-    statusLine.textContent = cloud?.message || "گفتار آماده نیست؛ پاسخ را بنویسید.";
+  }
+
+  // Free #2: Chrome/Edge Web Speech API (no card, no OpenAI).
+  try {
+    await startBrowserSpeechAgent();
+  } catch (error) {
+    const message = error.message || String(error);
+    statusLine.textContent = message + " — می‌توانید تایپ کنید.";
+    alert(message);
+    try {
+      await beginSession();
+    } catch (_error) {}
   }
 }
 
@@ -725,9 +830,15 @@ async function boot() {
   try {
     const payload = await fetch("/api/boot", { method: "POST" }).then((r) => r.json());
     applyState(payload);
-    if (payload.voice_agent?.enabled) {
+    if (payload.voice_agent?.enabled && payload.voice_agent?.provider === "openai_realtime") {
       asrChip.textContent = "OpenAI Realtime";
       statusLine.textContent = payload.voice_agent.message || payload.status || "";
+    } else if (payload.ready) {
+      asrChip.textContent = payload.asr?.name_fa || "شنوا کوچیک CTC";
+      statusLine.textContent = "حالت رایگان آماده است";
+    } else if (payload.voice_agent?.free) {
+      asrChip.textContent = "تشخیص گفتار رایگان";
+      statusLine.textContent = payload.voice_agent.message || "حالت رایگان";
     }
     await loadCalendar();
     await loadAppts();
