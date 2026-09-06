@@ -23,8 +23,10 @@ def api_key() -> str:
     lowered = raw.lower()
     if raw in _PLACEHOLDER_KEYS or lowered in _PLACEHOLDER_KEYS:
         return ""
-    # Real OpenAI keys are much longer than the example placeholder.
-    if len(raw) < 20 or not raw.startswith("sk-"):
+    # Real OpenAI secret keys are long (sk-... / sk-proj-...).
+    if len(raw) < 40 or not raw.startswith("sk-"):
+        return ""
+    if raw.endswith("_KEY") or "YOUR" in raw.upper() or "REAL" in raw.upper() or "REPLACE" in raw.upper():
         return ""
     return raw
 
