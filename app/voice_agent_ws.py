@@ -1,4 +1,4 @@
-"""Browser <-> OpenAI Realtime websocket proxy for the voice agent."""
+"""Browser <-> OpenAI Realtime (GA) websocket proxy for the voice agent."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ async def run_voice_agent_proxy(
     origin: str,
     deliver_invite: Callable[..., Any],
 ) -> None:
-    """Bridge browser mic/speaker audio to OpenAI Realtime and booking tools."""
+    """Bridge browser mic/speaker audio to OpenAI Realtime GA and booking tools."""
     await browser.accept()
     if not voice_agent.is_configured():
         await _send_json(
@@ -109,17 +109,11 @@ async def run_voice_agent_proxy(
                             )
                             await openai_ws.send(
                                 json.dumps(
-                                    {
-                                        "type": "response.create",
-                                        "response": {
-                                            "modalities": ["audio", "text"],
-                                            "instructions": (
-                                                "با همان متن فارسی زیر به مشتری سلام کن و دقیقاً همین را بگو، "
-                                                "بدون افزودن جمله اضافه:\n"
-                                                f"{greeting}"
-                                            ),
-                                        },
-                                    }
+                                    voice_agent.response_create_event(
+                                        "با همان متن فارسی زیر به مشتری سلام کن و دقیقاً همین را بگو، "
+                                        "بدون افزودن جمله اضافه:\n"
+                                        f"{greeting}"
+                                    )
                                 )
                             )
                         continue
@@ -142,7 +136,7 @@ async def run_voice_agent_proxy(
                                     }
                                 )
                             )
-                            await openai_ws.send(json.dumps({"type": "response.create"}))
+                            await openai_ws.send(json.dumps(voice_agent.response_create_event()))
                         continue
                     continue
                 if not data:
@@ -164,11 +158,13 @@ async def run_voice_agent_proxy(
 
                 if etype == "error":
                     err = event.get("error") or {}
+                    detail = err.get("message") or str(event)
+                    code = err.get("code") or ""
                     await _send_json(
                         browser,
                         {
                             "type": "error",
-                            "message": err.get("message") or str(event),
+                            "message": voice_agent.humanize_openai_error(f"{code} {detail}"),
                         },
                     )
                     continue
@@ -190,7 +186,10 @@ async def run_voice_agent_proxy(
                         )
                     continue
 
-                if etype == "response.audio_transcript.delta":
+                if etype in {
+                    "response.audio_transcript.delta",
+                    "response.output_audio_transcript.delta",
+                }:
                     delta = event.get("delta") or ""
                     if delta:
                         await _send_json(
@@ -199,7 +198,10 @@ async def run_voice_agent_proxy(
                         )
                     continue
 
-                if etype == "response.audio_transcript.done":
+                if etype in {
+                    "response.audio_transcript.done",
+                    "response.output_audio_transcript.done",
+                }:
                     transcript = (event.get("transcript") or "").strip()
                     if transcript:
                         await _send_json(
@@ -214,10 +216,21 @@ async def run_voice_agent_proxy(
                         await _send_bytes(browser, voice_agent.b64_to_bytes(b64))
                     continue
 
-                if etype == "response.function_call_arguments.done":
-                    call_id = event.get("call_id") or ""
+                if etype in {
+                    "response.function_call_arguments.done",
+                    "response.output_item.done",
+                }:
+                    # GA may wrap function calls differently; support both shapes.
                     name = event.get("name") or ""
+                    call_id = event.get("call_id") or ""
                     args = event.get("arguments") or "{}"
+                    item = event.get("item") or {}
+                    if item.get("type") == "function_call":
+                        name = item.get("name") or name
+                        call_id = item.get("call_id") or call_id
+                        args = item.get("arguments") or args
+                    if not name:
+                        continue
                     result = await asyncio.to_thread(
                         voice_agent.run_tool,
                         name,
@@ -254,20 +267,14 @@ async def run_voice_agent_proxy(
                     if speak:
                         await openai_ws.send(
                             json.dumps(
-                                {
-                                    "type": "response.create",
-                                    "response": {
-                                        "modalities": ["audio", "text"],
-                                        "instructions": (
-                                            "فقط همین متن فارسی را برای مشتری بلند بگو و چیزی اضافه نکن:\n"
-                                            f"{speak}"
-                                        ),
-                                    },
-                                }
+                                voice_agent.response_create_event(
+                                    "فقط همین متن فارسی را برای مشتری بلند بگو و چیزی اضافه نکن:\n"
+                                    f"{speak}"
+                                )
                             )
                         )
                     else:
-                        await openai_ws.send(json.dumps({"type": "response.create"}))
+                        await openai_ws.send(json.dumps(voice_agent.response_create_event()))
                     if isinstance(result, dict) and result.get("end_call"):
                         await _send_json(
                             browser,
@@ -279,7 +286,7 @@ async def run_voice_agent_proxy(
                         )
                     continue
 
-                if etype == "session.updated":
+                if etype in {"session.updated", "session.created"}:
                     await _send_json(browser, {"type": "status", "message": "آماده گفتگو"})
                     continue
 
@@ -295,17 +302,15 @@ async def run_voice_agent_proxy(
             exc = task.exception()
             if exc and not isinstance(exc, (WebSocketDisconnect, asyncio.CancelledError)):
                 logger.exception("voice agent proxy failed: %s", exc)
-                await _send_json(browser, {"type": "error", "message": str(exc)})
+                await _send_json(
+                    browser,
+                    {"type": "error", "message": voice_agent.humanize_openai_error(str(exc))},
+                )
     except WebSocketDisconnect:
         pass
     except Exception as exc:
         logger.exception("voice agent connection error")
-        detail = str(exc)
-        if "invalid_api_key" in detail:
-            detail = (
-                "کلید OpenAI نامعتبر است. یک کلید واقعی از "
-                "https://platform.openai.com/api-keys در /etc/persian-type.env بگذارید."
-            )
+        detail = voice_agent.humanize_openai_error(str(exc))
         try:
             await _send_json(browser, {"type": "error", "message": detail})
         except Exception:

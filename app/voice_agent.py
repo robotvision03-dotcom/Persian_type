@@ -1,4 +1,4 @@
-"""OpenAI Realtime voice-agent helpers for Persian dealership booking."""
+"""OpenAI Realtime (GA) voice-agent helpers for Persian dealership booking."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any, Callable
 from .cars import catalog_payload
 from .dialogue import DialogueManager
 
-DEFAULT_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview")
+DEFAULT_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime")
 DEFAULT_VOICE = os.environ.get("OPENAI_REALTIME_VOICE", "alloy")
 OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime"
 _PLACEHOLDER_KEYS = {"sk-...", "sk-xxx", "your-key", "changeme", "replace-me"}
@@ -39,7 +39,7 @@ def status_payload() -> dict[str, Any]:
     configured = is_configured()
     raw = (os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_KEY") or "").strip()
     if configured:
-        message = "عامل صوتی ابری آماده است (OpenAI Realtime)."
+        message = "عامل صوتی ابری آماده است (OpenAI Realtime GA)."
     elif raw:
         message = (
             "کلید OPENAI_API_KEY نامعتبر است (مثلاً sk-... نمونه). "
@@ -121,26 +121,41 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
 
 
 def session_update_event() -> dict[str, Any]:
+    """GA Realtime session.update payload (no beta fields)."""
     return {
         "type": "session.update",
         "session": {
-            "modalities": ["text", "audio"],
+            "type": "realtime",
+            "model": DEFAULT_MODEL,
             "instructions": system_instructions(),
-            "voice": DEFAULT_VOICE,
-            "input_audio_format": "pcm16",
-            "output_audio_format": "pcm16",
-            "input_audio_transcription": {"model": "whisper-1"},
-            "turn_detection": {
-                "type": "server_vad",
-                "threshold": 0.5,
-                "prefix_padding_ms": 300,
-                "silence_duration_ms": 650,
-            },
+            "output_modalities": ["audio"],
             "tools": TOOL_DEFINITIONS,
             "tool_choice": "auto",
-            "temperature": 0.6,
+            "audio": {
+                "input": {
+                    "format": {"type": "audio/pcm", "rate": 24000},
+                    "transcription": {"model": "gpt-4o-mini-transcribe"},
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "threshold": 0.5,
+                        "prefix_padding_ms": 300,
+                        "silence_duration_ms": 650,
+                    },
+                },
+                "output": {
+                    "format": {"type": "audio/pcm", "rate": 24000},
+                    "voice": DEFAULT_VOICE,
+                },
+            },
         },
     }
+
+
+def response_create_event(instructions: str | None = None) -> dict[str, Any]:
+    response: dict[str, Any] = {"output_modalities": ["audio"]}
+    if instructions:
+        response["instructions"] = instructions
+    return {"type": "response.create", "response": response}
 
 
 def run_tool(
@@ -194,15 +209,32 @@ def openai_headers() -> dict[str, str]:
     key = api_key()
     if not key:
         raise RuntimeError("OPENAI_API_KEY missing")
-    return {
-        "Authorization": f"Bearer {key}",
-        "OpenAI-Beta": "realtime=v1",
-    }
+    # GA Realtime: do NOT send OpenAI-Beta: realtime=v1
+    return {"Authorization": f"Bearer {key}"}
 
 
 def realtime_ws_url(model: str | None = None) -> str:
     chosen = model or DEFAULT_MODEL
     return f"{OPENAI_REALTIME_URL}?model={chosen}"
+
+
+def humanize_openai_error(detail: str) -> str:
+    text = detail or ""
+    lowered = text.lower()
+    if "invalid_api_key" in lowered:
+        return (
+            "کلید OpenAI نامعتبر است. یک کلید واقعی از "
+            "https://platform.openai.com/api-keys بگذارید."
+        )
+    if "insufficient_quota" in lowered or "credit_balance_exhausted" in lowered or "no credits" in lowered:
+        return (
+            "اعتبار حساب OpenAI تمام شده است. از "
+            "https://platform.openai.com/settings/organization/billing "
+            "اعتبار اضافه کنید، بعد دوباره شروع تماس بزنید."
+        )
+    if "beta_api_shape_disabled" in lowered:
+        return "نسخه قدیمی Realtime غیرفعال است؛ سرور را به نسخه GA به‌روز کنید."
+    return text
 
 
 def pcm16_b64(pcm_bytes: bytes) -> str:
