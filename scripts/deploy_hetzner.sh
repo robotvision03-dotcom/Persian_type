@@ -78,6 +78,7 @@ WorkingDirectory=$APP_DIR
 Environment=PYTHONUNBUFFERED=1
 Environment=PERSIAN_TYPE_DATA=/var/lib/persian-type
 Environment=MODELS_DIR=$APP_DIR/models
+EnvironmentFile=-/etc/persian-type.env
 ExecStart=$APP_DIR/.venv/bin/python -m app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=3
@@ -86,6 +87,16 @@ User=root
 [Install]
 WantedBy=multi-user.target
 EOF
+
+if [[ ! -f /etc/persian-type.env ]]; then
+  cat >/etc/persian-type.env <<'ENV'
+# Cloud voice agent (OpenAI Realtime). Uncomment and set the key:
+# OPENAI_API_KEY=sk-...
+# OPENAI_REALTIME_MODEL=gpt-4o-realtime-preview
+# OPENAI_REALTIME_VOICE=alloy
+ENV
+  chmod 600 /etc/persian-type.env
+fi
 
 cat >/etc/nginx/sites-available/persian-type <<EOF
 upstream persian_type_app {
