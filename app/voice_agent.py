@@ -13,10 +13,20 @@ from .dialogue import DialogueManager
 DEFAULT_MODEL = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview")
 DEFAULT_VOICE = os.environ.get("OPENAI_REALTIME_VOICE", "alloy")
 OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime"
+_PLACEHOLDER_KEYS = {"sk-...", "sk-xxx", "your-key", "changeme", "replace-me"}
 
 
 def api_key() -> str:
-    return (os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_KEY") or "").strip()
+    raw = (os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_KEY") or "").strip().strip('"').strip("'")
+    if not raw:
+        return ""
+    lowered = raw.lower()
+    if raw in _PLACEHOLDER_KEYS or lowered in _PLACEHOLDER_KEYS:
+        return ""
+    # Real OpenAI keys are much longer than the example placeholder.
+    if len(raw) < 20 or not raw.startswith("sk-"):
+        return ""
+    return raw
 
 
 def is_configured() -> bool:
@@ -25,16 +35,22 @@ def is_configured() -> bool:
 
 def status_payload() -> dict[str, Any]:
     configured = is_configured()
+    raw = (os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_KEY") or "").strip()
+    if configured:
+        message = "عامل صوتی ابری آماده است (OpenAI Realtime)."
+    elif raw:
+        message = (
+            "کلید OPENAI_API_KEY نامعتبر است (مثلاً sk-... نمونه). "
+            "یک کلید واقعی از platform.openai.com بگذارید."
+        )
+    else:
+        message = "کلید OPENAI_API_KEY تنظیم نشده؛ تماس متنی / مدل محلی فعال است."
     return {
         "enabled": configured,
         "provider": "openai_realtime" if configured else None,
         "model": DEFAULT_MODEL if configured else None,
         "voice": DEFAULT_VOICE if configured else None,
-        "message": (
-            "عامل صوتی ابری آماده است (OpenAI Realtime)."
-            if configured
-            else "کلید OPENAI_API_KEY تنظیم نشده؛ تماس متنی / مدل محلی فعال است."
-        ),
+        "message": message,
     }
 
 

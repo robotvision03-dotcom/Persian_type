@@ -1,4 +1,6 @@
 import unittest
+from unittest.mock import patch
+
 from app import voice_agent
 from app.dialogue import DialogueManager
 
@@ -7,6 +9,12 @@ class VoiceAgentTests(unittest.TestCase):
         payload = voice_agent.status_payload()
         self.assertIn("enabled", payload)
         self.assertFalse(payload["enabled"])
+
+    def test_rejects_placeholder_key(self):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-..."}, clear=False):
+            self.assertEqual(voice_agent.api_key(), "")
+            self.assertFalse(voice_agent.is_configured())
+            self.assertIn("نامعتبر", voice_agent.status_payload()["message"])
 
     def test_process_utterance_tool(self):
         dialogue = DialogueManager()

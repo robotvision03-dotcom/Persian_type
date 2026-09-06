@@ -64,6 +64,7 @@ async def run_voice_agent_proxy(
             max_size=8 * 1024 * 1024,
             ping_interval=20,
             ping_timeout=20,
+            open_timeout=20,
         )
         await openai_ws.send(json.dumps(voice_agent.session_update_event()))
         await _send_json(
@@ -299,8 +300,14 @@ async def run_voice_agent_proxy(
         pass
     except Exception as exc:
         logger.exception("voice agent connection error")
+        detail = str(exc)
+        if "invalid_api_key" in detail:
+            detail = (
+                "کلید OpenAI نامعتبر است. یک کلید واقعی از "
+                "https://platform.openai.com/api-keys در /etc/persian-type.env بگذارید."
+            )
         try:
-            await _send_json(browser, {"type": "error", "message": str(exc)})
+            await _send_json(browser, {"type": "error", "message": detail})
         except Exception:
             pass
     finally:
