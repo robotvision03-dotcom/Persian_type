@@ -92,6 +92,31 @@ class AppStateTests(unittest.TestCase):
         self.assertNotIn('id="wa-link"', html)
         self.assertNotIn('id="cal-link"', html)
 
+    def test_ui_has_no_long_help_copy(self):
+        banned = (
+            "تقویم شمسی است",
+            "جمعه تعطیل",
+            "ساعت‌های خالی از همان",
+            "سمن → سمند",
+            "واتساپ وب همین رایانه",
+            "بعد از ۱ ساعت، ۵ ساعت",
+            "فهرست خودروهای موجود در ایران",
+        )
+        files = [
+            ROOT / "static" / "index.html",
+            ROOT / "static" / "book.html",
+            ROOT / "static" / "app.js",
+            ROOT / "static" / "book.js",
+            ROOT / "static" / "office.html",
+            ROOT / "static" / "office.js",
+            ROOT / "static" / "buyer.html",
+            ROOT / "static" / "buyer.js",
+            ROOT / "README.md",
+        ]
+        blob = "\n".join(path.read_text(encoding="utf-8") for path in files)
+        for phrase in banned:
+            self.assertNotIn(phrase, blob)
+
     @unittest.skipUnless(TestClient, "httpx is required for the live websocket test")
     def test_live_endpoint_asks_next_question_immediately(self):
         with tempfile.TemporaryDirectory() as tmp:

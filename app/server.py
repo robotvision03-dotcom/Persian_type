@@ -40,7 +40,11 @@ from .dialogue import DialogueManager
 from .discovery import ModelInfo, find_models_dir, find_shenava_ctc, scan_models
 from .engines import Engine, TranscriptionError, load_engine
 from .jalali import to_jalali
+from .marketplace.api import router as marketplace_router
+from .marketplace.service import bootstrap as bootstrap_marketplace
 from .whatsapp import attach_message, send_text
+from . import voice_agent
+from .voice_agent_ws import run_voice_agent_proxy
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -128,6 +132,7 @@ class AppState:
         self.dialogue = DialogueManager(db_path=db_path)
         self.db_path = db_path
         init_db(db_path)
+        bootstrap_marketplace(db_path)
         self.refresh()
 
     def refresh(self) -> None:
@@ -153,6 +158,7 @@ class AppState:
                 "loading": self.loading,
                 "status": self.status,
                 "llm_model": "llama3.2:3b",
+                "voice_agent": voice_agent.status_payload(),
                 "hours": "۰۹:۰۰ تا ۱۷:۰۰",
                 "open_days": "شنبه تا پنجشنبه",
                 "weekend": "جمعه",
@@ -204,17 +210,22 @@ class AppState:
 
 state = AppState()
 app = FastAPI(title="رزرو نوبت نمایندگی خودرو", version="2.0.0")
+app.state.marketplace_db = state.db_path
+app.include_router(marketplace_router)
 
 
 def reset_state(models_dir: str | Path | None = None, db_path: Path | None = None) -> AppState:
     global state
     state = AppState(models_dir, db_path=db_path)
+    app.state.marketplace_db = state.db_path
     return state
 
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    from .booking import default_db_path
+
+    return {"status": "ok", "data_file": str(default_db_path())}
 
 
 @app.get("/api/state")
@@ -228,11 +239,17 @@ def boot_asr() -> dict[str, Any]:
     return state.boot()
 
 
+@app.get("/api/voice-agent/status")
+def voice_agent_status() -> dict[str, Any]:
+    return voice_agent.status_payload()
+
+
 @app.post("/api/call/start")
 def call_start(body: StartBody | None = None) -> dict[str, Any]:
     session_id = (body.session_id if body and body.session_id else None) or str(uuid4())
     payload = state.dialogue.start(session_id)
     payload["session_id"] = session_id
+    payload["voice_agent"] = voice_agent.status_payload()
     return payload
 
 
@@ -352,6 +369,26 @@ def post_book(body: BookBody) -> dict[str, Any]:
     except ValueError as extra:
         raise HTTPException(status_code=409, detail=str(extra)) from extra
     return {"ok": True, "id": appt_id, "message": "نوبت در فهرست مشتریان ثبت شد."}
+
+
+@app.websocket("/ws/voice-agent")
+async def voice_agent_socket(websocket: WebSocket) -> None:
+    """Cloud realtime voice agent (OpenAI) with booking tools."""
+    origin = str(websocket.headers.get("origin") or "").rstrip("/")
+    if not origin:
+        host = websocket.headers.get("host") or "localhost"
+        scheme = "https" if websocket.url.scheme in {"wss", "https"} else "http"
+        origin = f"{scheme}://{host}"
+
+    def _deliver(invite: dict[str, Any], public_origin: str) -> dict[str, Any]:
+        return deliver_whatsapp(invite, public_origin, db_path=state.db_path)
+
+    await run_voice_agent_proxy(
+        websocket,
+        dialogue=state.dialogue,
+        origin=origin,
+        deliver_invite=_deliver,
+    )
 
 
 @app.websocket("/ws/stream")
@@ -484,6 +521,16 @@ def customer_calendar(token: str) -> FileResponse:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/buyer")
+def buyer_portal() -> FileResponse:
+    return FileResponse(STATIC_DIR / "buyer.html")
+
+
+@app.get("/office")
+def office_portal() -> FileResponse:
+    return FileResponse(STATIC_DIR / "office.html")
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

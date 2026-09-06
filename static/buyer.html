@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>پورتال خریدار</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css?v=34" />
+    <link rel="stylesheet" href="/static/portal.css?v=34" />
+  </head>
+  <body class="portal-page">
+    <div class="backdrop"></div>
+    <header class="topbar compact">
+      <div>
+        <p class="eyebrow">خریدار ثبت‌شده</p>
+        <h1>مزایده</h1>
+      </div>
+      <div class="pills">
+        <a class="path-chip" href="/">تماس</a>
+        <span id="who" class="path-chip">وارد نشده</span>
+      </div>
+    </header>
+    <main class="shell portal">
+      <section id="auth-box" class="panel">
+        <div class="panel-head"><h2>ورود / ثبت‌نام</h2></div>
+        <form id="login-form" class="stack">
+          <input name="email" type="email" placeholder="ایمیل" required autocomplete="username" />
+          <input name="password" type="password" placeholder="رمز عبور" required autocomplete="current-password" />
+          <div class="actions">
+            <button class="start" type="submit">ورود</button>
+            <button class="ghost" id="open-register" type="button">ثبت‌نام</button>
+          </div>
+          <p id="auth-msg" class="hint"></p>
+        </form>
+      </section>
+      <div id="app-box" class="hidden">
+        <div id="toasts" class="toast-stack" aria-live="polite"></div>
+        <p id="account-line" class="hint"></p>
+        <nav class="tabs" id="buyer-tabs">
+          <button type="button" class="on" data-tab="live">مزایده</button>
+          <button type="button" data-tab="hist">تاریخچه</button>
+          <button type="button" data-tab="account">حساب</button>
+          <button class="ghost" id="logout-btn" type="button">خروج</button>
+        </nav>
+        <section class="panel pane on" data-pane="live">
+          <div id="auctions" class="empty">مزایده‌ای نیست.</div>
+        </section>
+        <section class="panel pane" data-pane="hist">
+          <div class="day-nav">
+            <button class="ghost" type="button" id="hist-prev">روز قبل</button>
+            <strong id="hist-label">امروز</strong>
+            <button class="ghost" type="button" id="hist-next">روز بعد</button>
+            <button class="ghost" type="button" id="hist-today">امروز</button>
+          </div>
+          <p id="hist-summary" class="hint"></p>
+          <div id="history"></div>
+          <div class="day-nav" id="hist-pages"></div>
+        </section>
+        <section class="panel pane" data-pane="account">
+          <p id="profile-summary" class="hint"></p>
+          <div class="actions">
+            <button class="ghost" id="open-profile" type="button">ویرایش پروفایل</button>
+          </div>
+          <p id="appts" class="empty">نوبتی نیست.</p>
+        </section>
+      </div>
+    </main>
+    <div id="register-sheet" class="sheet hidden">
+      <form id="register-form" class="vehicle-form sheet-box">
+        <h4>ثبت‌نام خریدار</h4>
+        <input name="email" type="email" placeholder="ایمیل" required autocomplete="username" />
+        <input name="password" type="password" placeholder="رمز عبور" required autocomplete="new-password" />
+        <input name="full_name" type="text" placeholder="نام و نام خانوادگی" required autocomplete="name" />
+        <input name="national_id" type="text" inputmode="numeric" placeholder="کد ملی / شماره شناسایی" required />
+        <input name="phone" type="tel" placeholder="شماره تلفن" required autocomplete="tel" />
+        <input name="business_name" type="text" placeholder="نام کسب‌وکار (اختیاری)" />
+        <div class="actions">
+          <button class="start" type="submit">ثبت‌نام</button>
+          <button class="ghost" id="close-register" type="button">بستن</button>
+        </div>
+        <p id="register-msg" class="hint"></p>
+      </form>
+    </div>
+    <div id="profile-sheet" class="sheet hidden">
+      <form id="profile-form" class="vehicle-form sheet-box">
+        <h4>ویرایش پروفایل</h4>
+        <label class="spec-field"><span>نام خریدار</span><input name="contact_person" required /></label>
+        <label class="spec-field"><span>کد ملی</span><input name="national_id" inputmode="numeric" /></label>
+        <label class="spec-field"><span>تلفن</span><input name="phone" type="tel" /></label>
+        <label class="spec-field"><span>ایمیل</span><input name="email" type="email" /></label>
+        <label class="spec-field"><span>کسب‌وکار</span><input name="business_name" /></label>
+        <label class="spec-field"><span>شهر</span><input name="city" /></label>
+        <label class="spec-field wide"><span>نشانی</span><input name="address" /></label>
+        <div class="actions">
+          <button class="start" type="submit">ذخیره پروفایل</button>
+          <button class="ghost" id="close-profile" type="button">بستن</button>
+        </div>
+        <p id="profile-msg" class="hint"></p>
+      </form>
+    </div>
+    <div id="bid-sheet" class="sheet hidden">
+      <form id="bid-form" class="vehicle-form sheet-box">
+        <h4 id="bid-title">ثبت پیشنهاد</h4>
+        <p id="bid-meta" class="hint"></p>
+        <label class="spec-field money-field"><span>مبلغ پیشنهاد</span>
+          <input id="bid-amount" class="bid-amount money-input" inputmode="numeric" dir="ltr" autocomplete="off" />
+          <p class="money-words" id="bid-words"></p>
+          <div class="money-chips" data-for="bid-amount">
+            <button type="button" data-add="10000000">+۱۰ میلیون</button>
+            <button type="button" data-add="50000000">+۵۰ میلیون</button>
+            <button type="button" data-add="100000000">+۱۰۰ میلیون</button>
+            <button type="button" data-add="500000000">+۵۰۰ میلیون</button>
+            <button type="button" data-add="1000000000">+۱ میلیارد</button>
+          </div>
+        </label>
+        <label class="spec-field money-field"><span>سقف خودکار</span>
+          <input id="auto-amount" class="auto-amount money-input" inputmode="numeric" dir="ltr" autocomplete="off" />
+          <p class="money-words" id="auto-words"></p>
+          <div class="money-chips" data-for="auto-amount">
+            <button type="button" data-add="10000000">+۱۰ میلیون</button>
+            <button type="button" data-add="50000000">+۵۰ میلیون</button>
+            <button type="button" data-add="100000000">+۱۰۰ میلیون</button>
+            <button type="button" data-add="500000000">+۵۰۰ میلیون</button>
+            <button type="button" data-add="1000000000">+۱ میلیارد</button>
+          </div>
+        </label>
+        <div class="actions">
+          <button class="start" id="bid-submit" type="button">ثبت پیشنهاد</button>
+          <button class="ghost" id="auto-submit" type="button">پیشنهاد خودکار</button>
+          <button class="ghost" id="close-bid" type="button">بستن</button>
+        </div>
+        <p id="bid-msg" class="hint"></p>
+      </form>
+    </div>
+    <script src="/static/buyer.js?v=34"></script>
+  </body>
+</html>

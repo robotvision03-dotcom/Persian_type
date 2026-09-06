@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, time as dtime
@@ -17,9 +19,106 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DB_PATH = DATA_DIR / "bookings.sqlite"
 
 
+BUSINESS_TABLES = (
+    "appointments",
+    "booking_invites",
+    "marketplace_appointments",
+    "vehicles",
+    "buyer_profiles",
+    "inspections",
+    "auctions",
+    "bids",
+)
+
+
+def _copy_sqlite(src: Path, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    for suffix in ("-wal", "-shm", "-journal"):
+        extra = Path(str(src) + suffix)
+        if extra.exists():
+            shutil.copy2(extra, Path(str(dest) + suffix))
+
+
+def sqlite_record_count(path: Path) -> int:
+    if not path.exists() or path.stat().st_size < 40:
+        return 0
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            total = 0
+            for table in BUSINESS_TABLES:
+                if table in names:
+                    total += int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            return total
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return 0
+
+
+def backup_sqlite(path: Path, keep: int = 12) -> Path | None:
+    if not path.exists() or path.stat().st_size == 0:
+        return None
+    folder = path.parent / "backups"
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d")
+    dest = folder / f"bookings-{stamp}.sqlite"
+    if dest.exists():
+        return dest
+    _copy_sqlite(path, dest)
+    old = sorted(folder.glob("bookings-*.sqlite"))
+    for extra in old[:-keep]:
+        extra.unlink(missing_ok=True)
+        for suffix in ("-wal", "-shm", "-journal"):
+            Path(str(extra) + suffix).unlink(missing_ok=True)
+    return dest
+
+
+def durable_db_dir() -> Path:
+    override = os.environ.get("PERSIAN_TYPE_DATA")
+    if override:
+        path = Path(override)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    root = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+    if root:
+        path = Path(root) / "PersianType"
+    else:
+        path = Path.home() / ".local" / "share" / "PersianType"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def durable_file(name: str) -> Path:
+    dest = durable_db_dir() / name
+    repo = DATA_DIR / name
+    if repo.exists() and not dest.exists():
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(repo, dest)
+    return dest
+
+
 def default_db_path() -> Path:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    return DB_PATH
+    env = os.environ.get("PERSIAN_TYPE_DB")
+    if env:
+        path = Path(env)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+    dest = durable_db_dir() / "bookings.sqlite"
+    repo_db = DATA_DIR / "bookings.sqlite"
+    if repo_db.exists():
+        dest_count = sqlite_record_count(dest)
+        repo_count = sqlite_record_count(repo_db)
+        if not dest.exists() or repo_count > dest_count:
+            if dest.exists() and dest_count > 0:
+                backup_sqlite(dest)
+            _copy_sqlite(repo_db, dest)
+    if dest.exists() and sqlite_record_count(dest) > 0:
+        backup_sqlite(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    return dest
 
 
 @contextmanager

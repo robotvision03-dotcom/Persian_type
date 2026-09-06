@@ -118,12 +118,12 @@ function showInvite(invite) {
   const sent = invite.whatsapp_sent || {};
   if (sent.ok) {
     $("invite-text").textContent = sent.queued
-      ? `لینک تقویم از واتساپ وب ${from} در حال ارسال است. پنجره واتساپ را باز بگذارید و این رایانه را جلو بگذارید.`
-      : `لینک تقویم از واتساپ ${from} برای مشتری ارسال شد.`;
+      ? `ارسال لینک از ${from}`
+      : `لینک ارسال شد.`;
   } else if (sent.error) {
-    $("invite-text").textContent = `ارسال خودکار واتساپ از ${from} انجام نشد. ${sent.error}`;
+    $("invite-text").textContent = sent.error;
   } else {
-    $("invite-text").textContent = `لینک تقویم از واتساپ ${from} برای مشتری ارسال شد.`;
+    $("invite-text").textContent = `لینک ارسال شد.`;
   }
 }
 
@@ -188,8 +188,8 @@ $("weekdays").innerHTML = ["ش", "ی", "د", "س", "چ", "پ", "ج"].map((d) => 
 function renderHours(data) {
   if (!data) return;
   $("day-label").textContent = data.open
-    ? `ساعت‌های خالی ${data.jalali || data.date} — شنبه تا پنجشنبه ۹ تا ۱۷، جمعه تعطیل`
-    : `${data.jalali || data.date} جمعه است و دفتر تعطیل است.`;
+    ? `ساعت‌های خالی ${data.jalali || data.date}`
+    : `${data.jalali || data.date} تعطیل است.`;
   const box = $("times");
   box.innerHTML = "";
   (data.all || []).forEach((time) => {
@@ -209,7 +209,7 @@ function renderHours(data) {
     box.appendChild(btn);
   });
   if (!(data.all || []).length) {
-    box.innerHTML = "<p class='hint'>این روز دفتر باز نیست. روز کاری بعد را از تقویم بزنید.</p>";
+    box.innerHTML = "<p class='hint'>تعطیل است.</p>";
   }
 }
 
@@ -410,10 +410,56 @@ function onAudioFrame(input) {
   }
 }
 
+function micErrorMessage(error) {
+  const name = error && error.name ? String(error.name) : "";
+  const raw = error && error.message ? String(error.message) : String(error || "");
+  if (!window.isSecureContext || location.protocol !== "https:") {
+    return (
+      "مرورگر فقط روی HTTPS میکروفون را روشن می‌کند. " +
+      `لطفاً https://${location.host} را باز کنید ` +
+      "(اول هشدار گواهی را بپذیرید، بعد اجازه میکروفون را بدهید)."
+    );
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return "این مرورگر دسترسی میکروفون ندارد. Chrome یا Edge را امتحان کنید.";
+  }
+  if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+    return "اجازه میکروفون داده نشد. در تنظیمات سایت مرورگر، میکروفون را Allow کنید و دوباره شروع تماس بزنید.";
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return "میکروفونی پیدا نشد. هدفون یا میکروفون را وصل کنید.";
+  }
+  if (name === "NotReadableError" || name === "TrackStartError") {
+    return "میکروفون در برنامه دیگری در حال استفاده است. آن را ببندید و دوباره تلاش کنید.";
+  }
+  return raw || "دسترسی به میکروفون ممکن نشد.";
+}
+
+async function requestMicrophone() {
+  if (!window.isSecureContext || location.protocol !== "https:") {
+    throw new Error(micErrorMessage({ name: "SecurityError" }));
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error(micErrorMessage({ name: "NotSupportedError" }));
+  }
+  statusLine.textContent = "درخواست دسترسی میکروفون...";
+  partialLine.textContent = "لطفاً در پنجره مرورگر، Allow / اجازه را بزنید";
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+  } catch (error) {
+    throw new Error(micErrorMessage(error));
+  }
+}
+
 async function startListening() {
-  mediaStream = await navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-  });
+  mediaStream = await requestMicrophone();
   audioContext = new AudioContext();
   if (audioContext.state === "suspended") await audioContext.resume();
   sourceNode = audioContext.createMediaStreamSource(mediaStream);
@@ -423,7 +469,7 @@ async function startListening() {
   socket.binaryType = "arraybuffer";
   await new Promise((resolve, reject) => {
     socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener("error", () => reject(new Error("اتصال زنده برقرار نشد")), { once: true });
+    socket.addEventListener("error", () => reject(new Error("اتصال زنده صوتی برقرار نشد")), { once: true });
   });
   socket.send(JSON.stringify({ type: "start", session_id: sessionId }));
   socket.addEventListener("message", (event) => {
@@ -464,12 +510,138 @@ function teardownAudio() {
   audioContext = null;
   mediaStream = null;
   levelBar.style.width = "0%";
+  stopCloudPlayback();
+}
+
+let voiceMode = "local"; // local | cloud
+let cloudPlaybackCtx = null;
+let cloudNextTime = 0;
+
+function stopCloudPlayback() {
+  cloudNextTime = 0;
+  try {
+    cloudPlaybackCtx && cloudPlaybackCtx.close();
+  } catch (_error) {}
+  cloudPlaybackCtx = null;
+}
+
+function playPcm16Cloud(bytes) {
+  if (!bytes || !bytes.byteLength) return;
+  if (!cloudPlaybackCtx) {
+    cloudPlaybackCtx = new AudioContext({ sampleRate: 24000 });
+    cloudNextTime = cloudPlaybackCtx.currentTime;
+  }
+  const samples = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
+  const floatData = new Float32Array(samples.length);
+  for (let i = 0; i < samples.length; i += 1) {
+    floatData[i] = samples[i] / 32768;
+  }
+  const buffer = cloudPlaybackCtx.createBuffer(1, floatData.length, 24000);
+  buffer.copyToChannel(floatData, 0);
+  const source = cloudPlaybackCtx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(cloudPlaybackCtx.destination);
+  const startAt = Math.max(cloudPlaybackCtx.currentTime + 0.02, cloudNextTime);
+  source.start(startAt);
+  cloudNextTime = startAt + buffer.duration;
+}
+
+function downsampleToRate(input, inputRate, outputRate) {
+  if (inputRate === outputRate) return input;
+  const ratio = inputRate / outputRate;
+  const length = Math.max(1, Math.floor(input.length / ratio));
+  const result = new Float32Array(length);
+  for (let i = 0; i < length; i += 1) {
+    const position = i * ratio;
+    const index = Math.floor(position);
+    const fraction = position - index;
+    const a = input[index] || 0;
+    const b = input[index + 1] || a;
+    result[i] = a + (b - a) * fraction;
+  }
+  return result;
+}
+
+async function startCloudVoiceAgent() {
+  voiceMode = "cloud";
+  logEl.innerHTML = "";
+  $("invite-box") && $("invite-box").classList.add("hidden");
+  mediaStream = await requestMicrophone();
+  audioContext = new AudioContext();
+  if (audioContext.state === "suspended") await audioContext.resume();
+  sourceNode = audioContext.createMediaStreamSource(mediaStream);
+  processor = audioContext.createScriptProcessor(4096, 1, 1);
+  const protocol = location.protocol === "https:" ? "wss" : "ws";
+  socket = new WebSocket(`${protocol}://${location.host}/ws/voice-agent`);
+  socket.binaryType = "arraybuffer";
+  await new Promise((resolve, reject) => {
+    socket.addEventListener("open", resolve, { once: true });
+    socket.addEventListener("error", () => reject(new Error("اتصال عامل صوتی ابری برقرار نشد")), { once: true });
+  });
+  socket.send(JSON.stringify({ type: "start", session_id: sessionId }));
+  socket.addEventListener("message", (event) => {
+    if (typeof event.data !== "string") {
+      playPcm16Cloud(new Uint8Array(event.data));
+      return;
+    }
+    const message = JSON.parse(event.data);
+    if (message.type === "status") statusLine.textContent = message.message || "";
+    if (message.type === "error") {
+      statusLine.textContent = message.message || "خطای عامل صوتی";
+      awaitingTurn = false;
+    }
+    if (message.type === "user_transcript" && message.text) {
+      addMsg("user", message.text, "مشتری");
+      partialLine.textContent = "";
+    }
+    if (message.type === "assistant_partial") {
+      partialLine.textContent = message.text || "";
+    }
+    if (message.type === "assistant_text" && message.text) {
+      addMsg("agent", message.text, "منشی ابری");
+      partialLine.textContent = inCall ? "گوش می‌دهم..." : "";
+      if (message.turn) {
+        if (message.turn.invite) showInvite(message.turn.invite);
+        if (message.turn.phase === "await_calendar" || message.turn.end_call) {
+          showInvite(message.turn.invite);
+        }
+      }
+    }
+    if (message.type === "tool_result" && message.turn) {
+      if (message.turn.invite) showInvite(message.turn.invite);
+      loadAppts();
+      loadFollowups();
+    }
+    if (message.type === "end_call") {
+      if (message.turn?.invite) showInvite(message.turn.invite);
+      statusLine.textContent = message.message || "تماس ابری تمام شد";
+      setTimeout(() => hangup(message.message || "تماس ابری تمام شد"), 1200);
+    }
+  });
+  processor.onaudioprocess = (event) => {
+    const input = event.inputBuffer.getChannelData(0);
+    updateLevel(input);
+    if (!inCall || !socket || socket.readyState !== WebSocket.OPEN) return;
+    const down = downsampleToRate(input, audioContext.sampleRate, 24000);
+    const pcm = floatTo16BitPCM(down);
+    socket.send(pcm.buffer);
+  };
+  const mute = audioContext.createGain();
+  mute.gain.value = 0;
+  sourceNode.connect(processor);
+  processor.connect(mute);
+  mute.connect(audioContext.destination);
+  asrChip.textContent = "OpenAI Realtime";
+  partialLine.textContent = "گوش می‌دهم...";
+  statusLine.textContent = "عامل صوتی ابری فعال است — میکروفون روشن";
 }
 
 async function hangup(statusText) {
   awaitingTurn = false;
   speaking = false;
+  voiceMode = "local";
   window.speechSynthesis && window.speechSynthesis.cancel();
+  stopBrowserSpeech();
   if (socket && socket.readyState === WebSocket.OPEN) {
     try {
       socket.send(JSON.stringify({ type: "hangup", session_id: sessionId }));
@@ -490,22 +662,146 @@ async function hangup(statusText) {
   statusLine.textContent = statusText || "تماس تمام شد";
 }
 
+let browserRecognition = null;
+
+function stopBrowserSpeech() {
+  try {
+    if (browserRecognition) {
+      browserRecognition.onend = null;
+      browserRecognition.onerror = null;
+      browserRecognition.onresult = null;
+      browserRecognition.stop();
+    }
+  } catch (_error) {}
+  browserRecognition = null;
+}
+
+function browserSpeechSupported() {
+  return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+}
+
+async function sendSpokenTurn(text) {
+  const payload = await fetch("/api/call/turn", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, text }),
+  }).then((r) => r.json());
+  applyTurn(payload, text);
+  return payload;
+}
+
+async function startBrowserSpeechAgent() {
+  if (!browserSpeechSupported()) {
+    throw new Error("این مرورگر تشخیص گفتار رایگان ندارد. Chrome را امتحان کنید.");
+  }
+  if (!window.isSecureContext || location.protocol !== "https:") {
+    throw new Error(micErrorMessage({ name: "SecurityError" }));
+  }
+  voiceMode = "browser";
+  await beginSession();
+  // Mic permission prompt (also needed on some browsers before SpeechRecognition).
+  const stream = await requestMicrophone();
+  stream.getTracks().forEach((track) => track.stop());
+
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  browserRecognition = new Recognition();
+  browserRecognition.lang = "fa-IR";
+  browserRecognition.continuous = true;
+  browserRecognition.interimResults = true;
+  browserRecognition.maxAlternatives = 1;
+
+  browserRecognition.onresult = (event) => {
+    let interim = "";
+    let finalText = "";
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      const piece = event.results[i][0].transcript || "";
+      if (event.results[i].isFinal) finalText += piece;
+      else interim += piece;
+    }
+    if (interim) partialLine.textContent = interim;
+    if (finalText.trim() && !awaitingTurn) {
+      awaitingTurn = true;
+      partialLine.textContent = "در حال فهمیدن جواب...";
+      sendSpokenTurn(finalText.trim())
+        .catch((error) => {
+          statusLine.textContent = error.message || String(error);
+        })
+        .finally(() => {
+          awaitingTurn = false;
+          if (inCall) partialLine.textContent = "گوش می‌دهم...";
+        });
+    }
+  };
+  browserRecognition.onerror = (event) => {
+    if (event.error === "not-allowed") {
+      statusLine.textContent = "اجازه میکروفون داده نشد.";
+      return;
+    }
+    if (event.error !== "no-speech" && event.error !== "aborted") {
+      statusLine.textContent = "خطای تشخیص گفتار: " + event.error;
+    }
+  };
+  browserRecognition.onend = () => {
+    if (inCall && voiceMode === "browser" && browserRecognition) {
+      try {
+        browserRecognition.start();
+      } catch (_error) {}
+    }
+  };
+  browserRecognition.start();
+  asrChip.textContent = "تشخیص گفتار رایگان مرورگر";
+  partialLine.textContent = "گوش می‌دهم...";
+  statusLine.textContent = "حالت رایگان — میکروفون Chrome فعال است";
+}
+
 async function startCall() {
   if (inCall) return;
   setCallUi(true);
   awaitingTurn = false;
   speaking = false;
-  await beginSession();
+  let cloud = null;
+  try {
+    cloud = await fetch("/api/voice-agent/status").then((r) => r.json());
+  } catch (_error) {
+    cloud = null;
+  }
+
+  // Paid OpenAI only when explicitly enabled.
+  if (cloud?.enabled && cloud?.provider === "openai_realtime") {
+    try {
+      await startCloudVoiceAgent();
+      return;
+    } catch (error) {
+      statusLine.textContent = (error.message || String(error)) + " — ادامه با حالت رایگان";
+    }
+  }
+
+  // Free #1: local Persian Shenava on the VPS (no card).
   if (state?.ready) {
     try {
+      await beginSession();
       await startListening();
+      asrChip.textContent = state?.asr?.name_fa || "شنوا کوچیک CTC";
       partialLine.textContent = "گوش می‌دهم...";
-      statusLine.textContent = "گوش می‌دهم...";
+      statusLine.textContent = "حالت رایگان — شنوا محلی فعال است";
+      return;
     } catch (error) {
-      statusLine.textContent = error.message + " — می‌توانید تایپ کنید.";
+      statusLine.textContent = (error.message || String(error)) + " — تلاش با تشخیص مرورگر";
+      try { await hangup(""); } catch (_error) {}
+      setCallUi(true);
     }
-  } else {
-    statusLine.textContent = "گفتار آماده نیست؛ پاسخ را بنویسید.";
+  }
+
+  // Free #2: Chrome/Edge Web Speech API (no card, no OpenAI).
+  try {
+    await startBrowserSpeechAgent();
+  } catch (error) {
+    const message = error.message || String(error);
+    statusLine.textContent = message + " — می‌توانید تایپ کنید.";
+    alert(message);
+    try {
+      await beginSession();
+    } catch (_error) {}
   }
 }
 
@@ -521,10 +817,29 @@ callBtn.addEventListener("click", () => {
 });
 
 async function boot() {
+  const banner = $("https-banner");
+  const httpsLink = $("https-link");
+  if (banner && location.protocol !== "https:") {
+    banner.classList.remove("hidden");
+    if (httpsLink) {
+      httpsLink.href = `https://${location.host}${location.pathname}${location.search}`;
+      httpsLink.textContent = `https://${location.host}`;
+    }
+  }
   setOverlay(true, "در حال آماده‌سازی دفتر...");
   try {
     const payload = await fetch("/api/boot", { method: "POST" }).then((r) => r.json());
     applyState(payload);
+    if (payload.voice_agent?.enabled && payload.voice_agent?.provider === "openai_realtime") {
+      asrChip.textContent = "OpenAI Realtime";
+      statusLine.textContent = payload.voice_agent.message || payload.status || "";
+    } else if (payload.ready) {
+      asrChip.textContent = payload.asr?.name_fa || "شنوا کوچیک CTC";
+      statusLine.textContent = "حالت رایگان آماده است";
+    } else if (payload.voice_agent?.free) {
+      asrChip.textContent = "تشخیص گفتار رایگان";
+      statusLine.textContent = payload.voice_agent.message || "حالت رایگان";
+    }
     await loadCalendar();
     await loadAppts();
     await loadFollowups();
